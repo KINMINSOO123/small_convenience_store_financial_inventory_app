@@ -43,7 +43,7 @@ class InventoryRepository {
 
   Future<List<PurchaseEntry>> fetchPurchases() async {
     final rows = await _database.fetchPurchases();
-    return rows.map(PurchaseEntry.fromMap).toList();
+    return (rows.map(PurchaseEntry.fromMap)).toList();
   }
 
   Future<List<StockBatch>> fetchBatches() async {

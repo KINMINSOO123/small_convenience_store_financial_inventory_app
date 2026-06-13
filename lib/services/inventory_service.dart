@@ -884,25 +884,31 @@ class InventoryService {
     List<InventoryItem> items,
   ) {
     final values = {
-      ...stored.where((category) => category.trim().isNotEmpty),
-      ...items.map((item) => item.category).where((name) => name.isNotEmpty),
+      ...stored
+          .map((category) => category.trim())
+          .where((category) => category.isNotEmpty),
+      ...items
+          .map((item) => item.category.trim())
+          .where((name) => name.isNotEmpty),
     }.toList();
     values.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
     return values;
   }
 
   bool _containsCategory(String name) {
+    final normalized = name.trim().toLowerCase();
     return _categories.any(
-      (category) => category.toLowerCase() == name.toLowerCase(),
+      (category) => category.trim().toLowerCase() == normalized,
     );
   }
 
   void _addCategoryIfMissing(String name) {
-    if (_containsCategory(name)) {
+    final normalized = name.trim();
+    if (_containsCategory(normalized)) {
       return;
     }
     _categories
-      ..add(name)
+      ..add(normalized)
       ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
   }
 

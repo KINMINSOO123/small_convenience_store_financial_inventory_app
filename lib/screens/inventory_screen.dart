@@ -530,7 +530,9 @@ class _InventoryScreenState extends State<InventoryScreen> {
                         categories: filteredCategories,
                         controller: _controller,
                         onOpen: (category) {
-                          setState(() => _selectedCategory = category);
+                          setState(
+                            () => _selectedCategory = category.trim(),
+                          );
                         },
                         onRename: (category) =>
                             _showCategoryDialog(existing: category),

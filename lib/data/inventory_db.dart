@@ -5,7 +5,7 @@ import '../models/inventory_item.dart';
 
 class InventoryDb {
   static const _dbName = 'inventory.db';
-  static const _dbVersion = 11;
+  static const _dbVersion = 12;
   static const _tableItems = 'inventory_items';
   static const _tableCategories = 'inventory_categories';
   static const _tableSettings = 'app_settings';
@@ -250,19 +250,42 @@ class InventoryDb {
             'ALTER TABLE $_tableItems '
             'ADD COLUMN selling_price REAL NOT NULL DEFAULT 0',
           );
-          // This is a bit of a hack, but it's the best we can do
-          // if the unit_cost column exists.
+          // Copy unit_cost to selling_price if the column exists
           try {
             await db.execute(
               'UPDATE $_tableItems '
               'SET selling_price = unit_cost '
               'WHERE selling_price = 0',
             );
-            // Now drop the unit_cost column as it is obsolete
-            await db.execute('ALTER TABLE $_tableItems DROP COLUMN unit_cost');
           } catch (e) {
-            // Ignore if unit_cost does not exist
+            // Ignore if unit_cost column does not exist
           }
+        }
+        if (oldVersion < 12) {
+          // Recreate inventory_items without the unit_cost column.
+          // ALTER TABLE DROP COLUMN requires SQLite >= 3.35.0, so we use the
+          // table-recreation technique instead.
+          await db.execute(
+            'CREATE TABLE ${_tableItems}_new('
+            'id INTEGER PRIMARY KEY AUTOINCREMENT,'
+            'name TEXT NOT NULL,'
+            'category TEXT NOT NULL,'
+            'quantity INTEGER NOT NULL,'
+            'selling_price REAL NOT NULL DEFAULT 0,'
+            'low_stock_threshold INTEGER NOT NULL DEFAULT 5,'
+            'expiry_date TEXT'
+            ')',
+          );
+          await db.execute(
+            'INSERT INTO ${_tableItems}_new '
+            '(id, name, category, quantity, selling_price, low_stock_threshold, expiry_date) '
+            'SELECT id, name, category, quantity, selling_price, low_stock_threshold, expiry_date '
+            'FROM $_tableItems',
+          );
+          await db.execute('DROP TABLE $_tableItems');
+          await db.execute(
+            'ALTER TABLE ${_tableItems}_new RENAME TO $_tableItems',
+          );
         }
       },
     );
@@ -276,15 +299,19 @@ class InventoryDb {
       orderBy: 'name COLLATE NOCASE ASC',
     );
     return rows
-        .map((row) => row['name'] as String? ?? '')
+        .map((row) => (row['name'] as String? ?? '').trim())
         .where((name) => name.isNotEmpty)
         .toList();
   }
 
   Future<void> insertCategory(String name) async {
+    final trimmed = name.trim();
+    if (trimmed.isEmpty) {
+      return;
+    }
     final db = await database;
     await db.insert(_tableCategories, {
-      'name': name,
+      'name': trimmed,
     }, conflictAlgorithm: ConflictAlgorithm.ignore);
   }
 

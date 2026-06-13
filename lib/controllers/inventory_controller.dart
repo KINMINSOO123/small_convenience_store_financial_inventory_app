@@ -7,10 +7,10 @@ import '../repositories/inventory_repository.dart';
 import '../services/inventory_service.dart';
 
 class InventoryController extends ChangeNotifier {
+  final InventoryService _service;
+
   InventoryController({InventoryService? inventoryService})
     : _service = inventoryService ?? InventoryService(InventoryRepository());
-
-  final InventoryService _service;
 
   bool _isLoading = false;
   String _searchQuery = '';
@@ -27,6 +27,7 @@ class InventoryController extends ChangeNotifier {
 
   List<InventoryItem> get items {
     final query = _searchQuery.trim().toLowerCase();
+    final normalizedFilter = _categoryFilter?.trim().toLowerCase();
     return List.unmodifiable(
       _service.items.where((item) {
         final matchesQuery =
@@ -34,7 +35,8 @@ class InventoryController extends ChangeNotifier {
             item.name.toLowerCase().contains(query) ||
             item.category.toLowerCase().contains(query);
         final matchesCategory =
-            _categoryFilter == null || item.category == _categoryFilter;
+            normalizedFilter == null ||
+            item.category.trim().toLowerCase() == normalizedFilter;
         return matchesQuery && matchesCategory;
       }),
     );
@@ -69,20 +71,25 @@ class InventoryController extends ChangeNotifier {
   }
 
   List<InventoryItem> itemsForCategory(String category) {
+    final normalized = category.trim().toLowerCase();
     return List.unmodifiable(
-      _service.items.where((item) => item.category == category),
+      _service.items.where(
+        (item) => item.category.trim().toLowerCase() == normalized,
+      ),
     );
   }
 
   int quantityForCategory(String category) {
+    final normalized = category.trim().toLowerCase();
     return _service.items
-        .where((item) => item.category == category)
+        .where((item) => item.category.trim().toLowerCase() == normalized)
         .fold(0, (sum, item) => sum + item.quantity);
   }
 
   double stockValueForCategory(String category) {
+    final normalized = category.trim().toLowerCase();
     final itemIds = _service.items
-        .where((item) => item.category == category)
+        .where((item) => item.category.trim().toLowerCase() == normalized)
         .map((item) => item.id)
         .toSet();
     return _service.batches
