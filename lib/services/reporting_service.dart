@@ -4,6 +4,7 @@ import '../models/journal_entry.dart';
 import '../models/journal_line.dart';
 import '../models/purchase_entry.dart';
 import '../models/sales_entry.dart';
+import '../models/sales_entry_item.dart';
 
 class ReportingService {
   ReportData buildReport({
@@ -15,6 +16,7 @@ class ReportingService {
     required List<JournalLine> journalLines,
     required List<Account> accounts,
     required List<SalesEntry> sales,
+    required List<SalesEntryItem> salesEntryItems,
     required double inventoryValue,
     required int lowStockCount,
     required int expiringSoonCount,
@@ -29,7 +31,7 @@ class ReportingService {
         .toList();
 
     final salesInRange =
-      sales.where((entry) => _isWithin(entry.date, start, end)).toList();
+      sales.where((entry) => _isWithin(entry.entryDate, start, end)).toList();
 
     final itemNames = {
       for (final item in items) item.id: item.name,
@@ -97,6 +99,7 @@ class ReportingService {
       purchases: purchasesInRange,
       expenses: expensesInRange,
       sales: salesInRange,
+      salesEntryItems: salesEntryItems,
       itemNames: itemNames,
       expenseCategoryByEntryId: expenseCategoryByEntryId,
     );
@@ -130,6 +133,7 @@ class ReportingService {
     required List<JournalLine> journalLines,
     required List<Account> accounts,
     required List<SalesEntry> sales,
+    required List<SalesEntryItem> salesEntryItems,
     double inventoryValue = 0,
     int lowStockCount = 0,
     int expiringSoonCount = 0,
@@ -147,6 +151,7 @@ class ReportingService {
       journalLines: journalLines,
       accounts: accounts,
       sales: sales,
+      salesEntryItems: salesEntryItems,
       inventoryValue: inventoryValue,
       lowStockCount: lowStockCount,
       expiringSoonCount: expiringSoonCount,
@@ -174,32 +179,38 @@ class ReportingService {
     required List<PurchaseEntry> purchases,
     required List<JournalEntry> expenses,
     required List<SalesEntry> sales,
+    required List<SalesEntryItem> salesEntryItems,
     required Map<int, String> itemNames,
     required Map<int, String> expenseCategoryByEntryId,
   }) {
     final daily = <DateTime, _DailyAccumulator>{};
 
     for (final entry in sales) {
-      final date = _normalizeDate(entry.date);
+      final date = _normalizeDate(entry.entryDate);
       final accumulator = daily.putIfAbsent(
         date,
         () => _DailyAccumulator(date: date),
       );
       accumulator.salesTotal += entry.amount;
-      accumulator.salesQuantity += entry.quantity;
-      final label = itemNames[entry.itemId] ?? 'Item #${entry.itemId}';
-      accumulator.salesLines.update(
-        label,
-        (line) => line.copyWith(
-          quantity: line.quantity + entry.quantity,
-          total: line.total + entry.amount,
-        ),
-        ifAbsent: () => ReportLine(
-          label: label,
-          quantity: entry.quantity,
-          total: entry.amount,
-        ),
-      );
+      final saleItems =
+          salesEntryItems.where((item) => item.salesId == entry.id);
+      for (final saleItem in saleItems) {
+        accumulator.salesQuantity += saleItem.quantity;
+        final label =
+            itemNames[saleItem.itemId] ?? 'Item #${saleItem.itemId}';
+        accumulator.salesLines.update(
+          label,
+          (line) => line.copyWith(
+            quantity: line.quantity + saleItem.quantity,
+            total: line.total + saleItem.subtotal,
+          ),
+          ifAbsent: () => ReportLine(
+            label: label,
+            quantity: saleItem.quantity,
+            total: saleItem.subtotal,
+          ),
+        );
+      }
     }
 
     for (final entry in expenses) {

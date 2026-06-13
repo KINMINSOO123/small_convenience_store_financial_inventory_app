@@ -6,13 +6,16 @@ import 'package:csv/csv.dart';
 
 import '../controllers/expenses_controller.dart';
 import '../controllers/inventory_controller.dart';
+import '../controllers/purchase_controller.dart';
 import '../controllers/sales_controller.dart';
 import '../data/inventory_db.dart';
 import '../repositories/expenses_repository.dart';
 import '../repositories/inventory_repository.dart';
+import '../repositories/purchase_repository.dart';
 import '../repositories/sales_repository.dart';
 import '../services/expenses_service.dart';
 import '../services/inventory_service.dart';
+import '../services/purchase_service.dart';
 import '../services/sales_service.dart';
 import 'expenses_screen.dart';
 import 'inventory_screen.dart';
@@ -27,12 +30,14 @@ class HomeShell extends StatefulWidget {
   State<HomeShell> createState() => _HomeShellState();
 }
 
-enum _CsvType { inventory, purchases, unknown }
+enum _CsvType { inventory, unknown }
 
 class _HomeShellState extends State<HomeShell> {
   late final InventoryDb _database = InventoryDb();
   late final InventoryRepository _inventoryRepository =
       InventoryRepository(database: _database);
+  late final PurchaseRepository _purchaseRepository =
+      PurchaseRepository(database: _database);
   late final ExpensesRepository _expensesRepository =
       ExpensesRepository(database: _database);
   late final SalesRepository _salesRepository =
@@ -40,16 +45,30 @@ class _HomeShellState extends State<HomeShell> {
 
   late final InventoryService _inventoryService =
       InventoryService(_inventoryRepository);
+  late final PurchaseService _purchaseService =
+      PurchaseService(_purchaseRepository, _inventoryService);
   late final InventoryController _inventoryController =
-      InventoryController(
-        inventoryService: _inventoryService,
+      InventoryController(inventoryService: _inventoryService);
+  late final PurchaseController _purchaseController =
+      PurchaseController(
+        purchaseService: _purchaseService,
+        onInventoryChanged: () {
+          _inventoryController.notifyListeners();
+        },
       );
   late final ExpensesController _expensesController = ExpensesController(
     expensesService: ExpensesService(_expensesRepository),
   );
   late final SalesController _salesController = SalesController(
-    salesService: SalesService(_salesRepository, _inventoryService),
-    onInventoryChanged: _inventoryController.notifyListeners,
+    salesService: SalesService(
+      _salesRepository,
+      _inventoryService,
+      _purchaseService,
+    ),
+    onInventoryChanged: () {
+      _inventoryController.notifyListeners();
+      _purchaseController.notifyListeners();
+    },
   );
   int _index = 0;
 
@@ -62,6 +81,7 @@ class _HomeShellState extends State<HomeShell> {
   @override
   void dispose() {
     _inventoryController.dispose();
+    _purchaseController.dispose();
     _expensesController.dispose();
     _salesController.dispose();
     super.dispose();
@@ -70,6 +90,7 @@ class _HomeShellState extends State<HomeShell> {
   Future<void> _loadData() async {
     await Future.wait([
       _inventoryController.loadData(),
+      _purchaseController.loadData(),
       _expensesController.loadData(),
       _salesController.loadData(),
     ]);
@@ -138,8 +159,7 @@ class _HomeShellState extends State<HomeShell> {
           content: SizedBox(
             width: double.maxFinite,
             child: SelectableText(
-              'Inventory CSV:\n${paths['inventory']}\n\n'
-              'Purchases CSV:\n${paths['purchases']}',
+              'Inventory CSV:\n${paths['inventory']}\n\n',
             ),
           ),
           actions: [
@@ -164,7 +184,6 @@ class _HomeShellState extends State<HomeShell> {
     }
 
     String? inventoryCsv;
-    String? purchasesCsv;
 
     for (final file in result.files) {
       final path = file.path;
@@ -175,18 +194,16 @@ class _HomeShellState extends State<HomeShell> {
       final type = _detectCsvType(content);
       if (type == _CsvType.inventory) {
         inventoryCsv = content;
-      } else if (type == _CsvType.purchases) {
-        purchasesCsv = content;
       }
     }
 
-    if (inventoryCsv == null || purchasesCsv == null) {
+    if (inventoryCsv == null) {
       if (!mounted) {
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Please select both inventory and purchases CSV files.'),
+          content: Text('Please select an inventory CSV file.'),
         ),
       );
       return;
@@ -194,7 +211,7 @@ class _HomeShellState extends State<HomeShell> {
 
     await _inventoryController.importCsvFiles(
       inventoryCsv: inventoryCsv,
-      purchasesCsv: purchasesCsv,
+      purchasesCsv: '',
     );
   }
 
@@ -206,9 +223,6 @@ class _HomeShellState extends State<HomeShell> {
     final headers = rows.first
         .map((value) => value.toString().trim().toLowerCase())
         .toList();
-    if (headers.contains('purchased_at') || headers.contains('item_id')) {
-      return _CsvType.purchases;
-    }
     if (headers.contains('category') && headers.contains('unit_cost')) {
       return _CsvType.inventory;
     }
@@ -217,7 +231,10 @@ class _HomeShellState extends State<HomeShell> {
 
   List<Widget> get _screens => [
         InventoryScreen(controller: _inventoryController),
-        PurchasesScreen(controller: _inventoryController),
+        PurchasesScreen(
+          controller: _purchaseController,
+          inventoryController: _inventoryController,
+        ),
         SalesScreen(
           controller: _salesController,
           inventoryController: _inventoryController,
@@ -225,6 +242,7 @@ class _HomeShellState extends State<HomeShell> {
         ExpensesScreen(controller: _expensesController),
         ReportingScreen(
           inventoryController: _inventoryController,
+          purchaseController: _purchaseController,
           expensesController: _expensesController,
           salesController: _salesController,
         ),

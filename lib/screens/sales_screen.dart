@@ -4,6 +4,7 @@ import '../controllers/inventory_controller.dart';
 import '../controllers/sales_controller.dart';
 import '../models/inventory_item.dart';
 import '../models/sales_entry.dart';
+import '../models/sales_entry_item.dart';
 
 class SalesScreen extends StatefulWidget {
   const SalesScreen({
@@ -26,6 +27,12 @@ class _SalesScreenState extends State<SalesScreen> {
   DateTime? _startDate;
   DateTime? _endDate;
 
+  SalesEntryItem? _firstLineItem(SalesEntry entry) {
+    return _controller.salesEntryItems
+        .where((item) => item.salesId == entry.id)
+        .firstOrNull;
+  }
+
   Future<void> _showSaleDialog({SalesEntry? existing}) async {
     final items = _inventoryController.allItems;
     if (items.isEmpty) {
@@ -40,12 +47,14 @@ class _SalesScreenState extends State<SalesScreen> {
       return;
     }
 
-    int selectedItemId = existing?.itemId ?? items.first.id;
+    final existingLineItem =
+        existing == null ? null : _firstLineItem(existing);
+    int selectedItemId = existingLineItem?.itemId ?? items.first.id;
     final quantityController = TextEditingController(
-      text: existing?.quantity.toString() ?? '',
+      text: existingLineItem?.quantity.toString() ?? '',
     );
     final memoController = TextEditingController(text: existing?.memo ?? '');
-    DateTime entryDate = existing?.date ?? DateTime.now();
+    DateTime entryDate = existing?.entryDate ?? DateTime.now();
 
     final result = await showDialog<bool>(
       context: context,
@@ -83,7 +92,7 @@ class _SalesScreenState extends State<SalesScreen> {
                     const SizedBox(height: 12),
                     _StockHint(
                       item: _inventoryController.getItemById(selectedItemId),
-                      existing: existing,
+                      existingLineItem: existingLineItem,
                     ),
                     const SizedBox(height: 12),
                     TextField(
@@ -166,7 +175,9 @@ class _SalesScreenState extends State<SalesScreen> {
       return;
     }
     final available = selectedItem.quantity +
-        (existing?.itemId == selectedItemId ? existing!.quantity : 0);
+        (existingLineItem != null && existingLineItem.itemId == selectedItemId
+            ? existingLineItem.quantity
+            : 0);
     if (quantity > available) {
       if (!mounted) {
         return;
@@ -294,7 +305,7 @@ class _SalesScreenState extends State<SalesScreen> {
       ]),
       builder: (context, _) {
         final sales = _controller.salesEntries
-            .where((entry) => _isWithinRange(entry.date))
+            .where((entry) => _isWithinRange(entry.entryDate))
             .toList();
         final total = sales.fold<double>(
           0,
@@ -372,9 +383,12 @@ class _SalesScreenState extends State<SalesScreen> {
                           separatorBuilder: (_, __) => const Divider(height: 1),
                           itemBuilder: (context, index) {
                             final entry = sales[index];
-                            final item = _inventoryController.getItemById(
-                              entry.itemId,
-                            );
+                            final lineItem = _firstLineItem(entry);
+                            final item = lineItem == null
+                                ? null
+                                : _inventoryController.getItemById(
+                                    lineItem.itemId,
+                                  );
                             final memo = entry.memo.isEmpty
                                 ? 'Sale'
                               : entry.memo;
@@ -389,10 +403,13 @@ class _SalesScreenState extends State<SalesScreen> {
                                     .primaryContainer,
                                 child: const Icon(Icons.point_of_sale_outlined),
                               ),
-                              title: Text(item?.name ?? 'Item #${entry.itemId}'),
+                              title: Text(
+                                item?.name ??
+                                    'Item #${lineItem?.itemId ?? '?'}',
+                              ),
                               subtitle: Text(
-                                '${_formatDate(entry.date)} · '
-                                '${entry.quantity} units · $memo',
+                                '${_formatDate(entry.entryDate)} · '
+                                '${lineItem?.quantity ?? 0} units · $memo',
                               ),
                               trailing: PopupMenuButton<String>(
                                 onSelected: (value) async {
@@ -402,7 +419,7 @@ class _SalesScreenState extends State<SalesScreen> {
                                   if (value == 'delete') {
                                     final confirmed =
                                         await _confirmDeleteSale(
-                                      _formatDate(entry.date),
+                                      _formatDate(entry.entryDate),
                                     );
                                     if (confirmed == true) {
                                       await _controller.deleteSale(entry.id);
@@ -439,11 +456,11 @@ class _SalesScreenState extends State<SalesScreen> {
 class _StockHint extends StatelessWidget {
   const _StockHint({
     required this.item,
-    required this.existing,
+    required this.existingLineItem,
   });
 
   final InventoryItem? item;
-  final SalesEntry? existing;
+  final SalesEntryItem? existingLineItem;
 
   @override
   Widget build(BuildContext context) {
@@ -451,7 +468,9 @@ class _StockHint extends StatelessWidget {
       return const SizedBox.shrink();
     }
     final available = item!.quantity +
-        (existing?.itemId == item!.id ? existing!.quantity : 0);
+        (existingLineItem != null && existingLineItem!.itemId == item!.id
+            ? existingLineItem!.quantity
+            : 0);
     return Row(
       children: [
         Expanded(

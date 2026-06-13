@@ -126,13 +126,9 @@ class _InventoryScreenState extends State<InventoryScreen> {
   }) async {
     final normalizedCategory = category.trim();
     final nameController = TextEditingController(text: existing?.name ?? '');
-    final quantityController = TextEditingController(
-      text: existing?.quantity.toString() ?? '',
-    );
     final sellingPriceController = TextEditingController(
       text: existing == null ? '' : existing.sellingPrice.toStringAsFixed(2),
     );
-    final initialCostController = TextEditingController();
     final thresholdController = TextEditingController(
       text:
           existing?.lowStockThreshold.toString() ??
@@ -164,13 +160,6 @@ class _InventoryScreenState extends State<InventoryScreen> {
                     ),
                     const SizedBox(height: 12),
                     TextField(
-                      controller: quantityController,
-                      decoration: const InputDecoration(labelText: 'Quantity'),
-                      keyboardType: TextInputType.number,
-                      textInputAction: TextInputAction.next,
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
                       controller: sellingPriceController,
                       decoration: const InputDecoration(
                         labelText: 'Selling price',
@@ -180,19 +169,6 @@ class _InventoryScreenState extends State<InventoryScreen> {
                       ),
                       textInputAction: TextInputAction.next,
                     ),
-                    if (existing == null) ...[
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: initialCostController,
-                        decoration: const InputDecoration(
-                          labelText: 'Initial unit cost',
-                        ),
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
-                        textInputAction: TextInputAction.next,
-                      ),
-                    ],
                     const SizedBox(height: 12),
                     TextField(
                       controller: thresholdController,
@@ -227,15 +203,11 @@ class _InventoryScreenState extends State<InventoryScreen> {
 
     final name = nameController.text.trim();
     final categoryName = normalizedCategory;
-    final quantity = int.tryParse(quantityController.text.trim());
     final sellingPrice = double.tryParse(sellingPriceController.text.trim());
-    final initialUnitCost = double.tryParse(initialCostController.text.trim());
     final lowStockThreshold = int.tryParse(thresholdController.text.trim());
 
     if (name.isEmpty ||
         categoryName.isEmpty ||
-        quantity == null ||
-        quantity < 0 ||
         sellingPrice == null ||
         lowStockThreshold == null ||
         lowStockThreshold <= 0) {
@@ -251,24 +223,11 @@ class _InventoryScreenState extends State<InventoryScreen> {
     }
 
     if (existing == null) {
-      if (quantity > 0 && initialUnitCost == null) {
-        if (!mounted) {
-          return;
-        }
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Enter the initial unit cost for opening stock.'),
-          ),
-        );
-        return;
-      }
         try {
           await _controller.addItem(
             name: name,
             category: categoryName,
-            quantity: quantity,
             sellingPrice: sellingPrice,
-            initialUnitCost: initialUnitCost ?? 0,
             lowStockThreshold: lowStockThreshold,
           );
         } catch (error) {
@@ -287,7 +246,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
               id: existing.id,
               name: name,
               category: categoryName,
-              quantity: quantity,
+              quantity: existing.quantity,
               sellingPrice: sellingPrice,
               lowStockThreshold: lowStockThreshold,
             ),

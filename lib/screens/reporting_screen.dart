@@ -9,6 +9,7 @@ import 'package:share_plus/share_plus.dart';
 
 import '../controllers/expenses_controller.dart';
 import '../controllers/inventory_controller.dart';
+import '../controllers/purchase_controller.dart';
 import '../controllers/sales_controller.dart';
 import '../services/reporting_service.dart';
 
@@ -16,11 +17,13 @@ class ReportingScreen extends StatefulWidget {
   const ReportingScreen({
     super.key,
     required this.inventoryController,
+    required this.purchaseController,
     required this.expensesController,
     required this.salesController,
   });
 
   final InventoryController inventoryController;
+  final PurchaseController purchaseController;
   final ExpensesController expensesController;
   final SalesController salesController;
 
@@ -36,6 +39,7 @@ class _ReportingScreenState extends State<ReportingScreen> {
   DateTime? _selectedDate;
 
   InventoryController get _inventoryController => widget.inventoryController;
+  PurchaseController get _purchaseController => widget.purchaseController;
   ExpensesController get _expensesController => widget.expensesController;
   SalesController get _salesController => widget.salesController;
 
@@ -233,12 +237,14 @@ class _ReportingScreenState extends State<ReportingScreen> {
                             : [
                                 _reportingService.buildDailyReport(
                                   date: _selectedDate,
-                                  purchases: _inventoryController.allPurchases,
+                                  purchases: _purchaseController.allPurchases,
                                   items: _inventoryController.allItems,
                                   expenses: _expensesController.expenseEntries,
                                   journalLines: _expensesController.journalLines,
                                   accounts: _expensesController.accounts,
                                   sales: _salesController.salesEntries,
+                                  salesEntryItems:
+                                      _salesController.salesEntryItems,
                                   inventoryValue: _inventoryController.totalValue,
                                   lowStockCount:
                                       _inventoryController.lowStockItems.length,
@@ -294,12 +300,13 @@ class _ReportingScreenState extends State<ReportingScreen> {
     return _reportingService.buildReport(
       start: start,
       end: now,
-      purchases: _inventoryController.allPurchases,
+      purchases: _purchaseController.allPurchases,
       items: _inventoryController.allItems,
       expenses: _expensesController.expenseEntries,
       journalLines: _expensesController.journalLines,
       accounts: _expensesController.accounts,
       sales: _salesController.salesEntries,
+      salesEntryItems: _salesController.salesEntryItems,
       inventoryValue: _inventoryController.totalValue,
       lowStockCount: _inventoryController.lowStockItems.length,
       expiringSoonCount: _inventoryController.expiringSoonItems.length,

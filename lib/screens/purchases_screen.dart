@@ -1,19 +1,26 @@
 import 'package:flutter/material.dart';
 
 import '../controllers/inventory_controller.dart';
+import '../controllers/purchase_controller.dart';
 import '../models/purchase_entry.dart';
 
 class PurchasesScreen extends StatefulWidget {
-  const PurchasesScreen({super.key, required this.controller});
+  const PurchasesScreen({
+    super.key,
+    required this.controller,
+    required this.inventoryController,
+  });
 
-  final InventoryController controller;
+  final PurchaseController controller;
+  final InventoryController inventoryController;
 
   @override
   State<PurchasesScreen> createState() => _PurchasesScreenState();
 }
 
 class _PurchasesScreenState extends State<PurchasesScreen> {
-  InventoryController get _controller => widget.controller;
+  PurchaseController get _controller => widget.controller;
+  InventoryController get _inventoryController => widget.inventoryController;
 
   Future<void> _showPurchaseDialog({PurchaseEntry? existing}) async {
     final quantityController = TextEditingController(
@@ -26,26 +33,26 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
     final itemNameController = TextEditingController();
     final categoryController = TextEditingController();
     final thresholdController = TextEditingController(
-      text: _controller.lowStockThreshold.toString(),
+      text: _inventoryController.lowStockThreshold.toString(),
     );
     DateTime? expiryDate = existing?.expiryDate;
     DateTime purchaseDate = existing?.purchasedAt ?? DateTime.now();
     final existingItem = existing == null
         ? null
-        : _controller.getItemById(existing.itemId);
+        : _inventoryController.getItemById(existing.itemId);
     String? selectedCategory =
         existingItem?.category ??
-        (_controller.categories.isEmpty ? null : _controller.categories.first);
+        (_inventoryController.categories.isEmpty ? null : _inventoryController.categories.first);
     int? selectedItemId = existing?.itemId;
-    bool createNewCategory = existing == null && _controller.categories.isEmpty;
+    bool createNewCategory = existing == null && _inventoryController.categories.isEmpty;
     bool createNewItem =
         existing == null &&
         (createNewCategory ||
             selectedCategory == null ||
-            _controller.itemsForCategory(selectedCategory).isEmpty);
+            _inventoryController.itemsForCategory(selectedCategory).isEmpty);
     final allowNewItem = existing == null;
     if (!createNewItem && selectedCategory != null && selectedItemId == null) {
-      final categoryItems = _controller.itemsForCategory(selectedCategory);
+      final categoryItems = _inventoryController.itemsForCategory(selectedCategory);
       if (categoryItems.isNotEmpty) {
         selectedItemId = categoryItems.first.id;
       }
@@ -88,9 +95,9 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
                               createNewItem = true;
                               selectedCategory = null;
                               selectedItemId = null;
-                            } else if (_controller.categories.isNotEmpty) {
-                              selectedCategory = _controller.categories.first;
-                              final categoryItems = _controller
+                            } else if (_inventoryController.categories.isNotEmpty) {
+                              selectedCategory = _inventoryController.categories.first;
+                              final categoryItems = _inventoryController
                                   .itemsForCategory(selectedCategory!);
                               createNewItem = categoryItems.isEmpty;
                               selectedItemId = categoryItems.isEmpty
@@ -108,13 +115,13 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
                         ),
                         textInputAction: TextInputAction.next,
                       )
-                    else if (_controller.categories.isNotEmpty)
+                    else if (_inventoryController.categories.isNotEmpty)
                       DropdownButtonFormField<String>(
                         value: selectedCategory,
                         decoration: const InputDecoration(
                           labelText: 'Category',
                         ),
-                        items: _controller.categories
+                        items: _inventoryController.categories
                             .map(
                               (category) => DropdownMenuItem<String>(
                                 value: category,
@@ -129,7 +136,7 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
                                 }
                                 setDialogState(() {
                                   selectedCategory = value;
-                                  final categoryItems = _controller
+                                  final categoryItems = _inventoryController
                                       .itemsForCategory(value);
                                   createNewItem = categoryItems.isEmpty;
                                   selectedItemId = categoryItems.isEmpty
@@ -148,14 +155,14 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
                           final category = selectedCategory;
                           final hasItems =
                               category != null &&
-                              _controller.itemsForCategory(category).isNotEmpty;
+                              _inventoryController.itemsForCategory(category).isNotEmpty;
                           if (!hasItems) {
                             return;
                           }
                           setDialogState(() {
                             createNewItem = value;
                             if (!value) {
-                              selectedItemId = _controller
+                              selectedItemId = _inventoryController
                                   .itemsForCategory(category)
                                   .first
                                   .id;
@@ -167,16 +174,16 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
                       DropdownButtonFormField<int?>(
                         value:
                             selectedItemId ??
-                            (_controller
+                            (_inventoryController
                                     .itemsForCategory(selectedCategory!)
                                     .isEmpty
                                 ? null
-                                : _controller
+                                : _inventoryController
                                       .itemsForCategory(selectedCategory!)
                                       .first
                                       .id),
                         decoration: const InputDecoration(labelText: 'Item'),
-                        items: _controller
+                        items: _inventoryController
                             .itemsForCategory(selectedCategory!)
                             .map(
                               (item) => DropdownMenuItem<int>(
@@ -407,22 +414,25 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
         return;
       }
       try {
-        await _controller.addPurchaseForNewItem(
+        final newItem = await _inventoryController.addItem(
           name: name,
           category: category,
-          quantity: quantity,
-          unitCost: unitCost,
           sellingPrice: sellingPrice,
-          purchasedAt: purchaseDate,
-          expiryDate: expiryDate,
           lowStockThreshold: lowStockThreshold,
         );
-      } on StateError catch (error) {
+        await _controller.addPurchase(
+          itemId: newItem.id,
+          quantity: quantity,
+          unitCost: unitCost,
+          purchasedAt: purchaseDate,
+          expiryDate: expiryDate,
+        );
+      } catch (error) {
         if (!mounted) {
           return;
         }
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(error.message)),
+          SnackBar(content: Text('Unable to add purchase: $error')),
         );
       }
       return;
@@ -431,7 +441,7 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
     final fallbackCategory = selectedCategory;
     final fallbackItems = fallbackCategory == null
         ? null
-        : _controller.itemsForCategory(fallbackCategory);
+        : _inventoryController.itemsForCategory(fallbackCategory);
     final itemId =
         selectedItemId ??
         (fallbackItems == null || fallbackItems.isEmpty
@@ -622,7 +632,7 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
                           separatorBuilder: (_, __) => const Divider(height: 1),
                           itemBuilder: (context, index) {
                             final purchase = purchases[index];
-                            final item = _controller.getItemById(
+                            final item = _inventoryController.getItemById(
                               purchase.itemId,
                             );
                             final name = item?.name ?? 'Unknown item';

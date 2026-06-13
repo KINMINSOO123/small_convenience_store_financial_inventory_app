@@ -1,29 +1,28 @@
 import 'package:flutter/foundation.dart';
 
 import '../models/inventory_item.dart';
-import '../models/purchase_entry.dart';
 import '../models/stock_batch.dart';
-import '../repositories/inventory_repository.dart';
 import '../services/inventory_service.dart';
+import 'purchase_controller.dart';
 
 class InventoryController extends ChangeNotifier {
+  InventoryController({
+    required InventoryService inventoryService,
+    PurchaseController? purchaseController,
+  }) : _service = inventoryService,
+       _purchaseController = purchaseController;
+
   final InventoryService _service;
-
-  InventoryController({InventoryService? inventoryService})
-    : _service = inventoryService ?? InventoryService(InventoryRepository());
-
+  final PurchaseController? _purchaseController;
   bool _isLoading = false;
   String _searchQuery = '';
   String? _categoryFilter;
-  PurchaseFilter _purchaseFilter = PurchaseFilter.all;
 
   bool get isLoading => _isLoading;
 
   String? get categoryFilter => _categoryFilter;
 
   int get lowStockThreshold => _service.lowStockThreshold;
-
-  PurchaseFilter get purchaseFilter => _purchaseFilter;
 
   List<InventoryItem> get items {
     final query = _searchQuery.trim().toLowerCase();
@@ -44,25 +43,10 @@ class InventoryController extends ChangeNotifier {
 
   List<InventoryItem> get allItems => List.unmodifiable(_service.items);
 
-  List<PurchaseEntry> get purchases {
-    final list = _service.purchases.toList();
-    switch (_purchaseFilter) {
-      case PurchaseFilter.active:
-        return List.unmodifiable(list.where((entry) => !entry.isCancelled));
-      case PurchaseFilter.cancelled:
-        return List.unmodifiable(list.where((entry) => entry.isCancelled));
-      case PurchaseFilter.all:
-        return List.unmodifiable(list);
-    }
-  }
-
-  List<PurchaseEntry> get allPurchases => List.unmodifiable(_service.purchases);
-
-  List<StockBatch> get batches => List.unmodifiable(_service.batches);
-
   int get totalQuantity => _service.totalQuantity;
 
-  double get totalValue => _service.totalValue;
+  double get totalValue =>
+      _purchaseController?.totalValue ?? _service.totalValue;
 
   List<String> get categories {
     final values = _service.categories.toSet().toList();
@@ -87,21 +71,21 @@ class InventoryController extends ChangeNotifier {
   }
 
   double stockValueForCategory(String category) {
+    final purchaseController = _purchaseController;
+    if (purchaseController == null) {
+      return 0;
+    }
     final normalized = category.trim().toLowerCase();
     final itemIds = _service.items
         .where((item) => item.category.trim().toLowerCase() == normalized)
         .map((item) => item.id)
         .toSet();
-    return _service.batches
+    return purchaseController.batches
         .where((batch) => itemIds.contains(batch.itemId))
         .fold(
           0,
           (sum, batch) => sum + (batch.remainingQuantity * batch.unitCost),
         );
-  }
-
-  List<StockBatch> stockRotationForItem(int itemId) {
-    return _service.stockRotationForItem(itemId);
   }
 
   Future<bool> addCategory(String name) async {
@@ -127,10 +111,14 @@ class InventoryController extends ChangeNotifier {
   }
 
   List<InventoryItem> get expiringSoonItems {
+    final purchaseController = _purchaseController;
+    if (purchaseController == null) {
+      return [];
+    }
     final now = DateTime.now();
     final soon = now.add(const Duration(days: 7));
     return _service.items.where((item) {
-      final expiry = _service.nextExpiryForItem(item.id);
+      final expiry = purchaseController.nextExpiryForItem(item.id);
       if (expiry == null) {
         return false;
       }
@@ -142,12 +130,16 @@ class InventoryController extends ChangeNotifier {
     return _service.getItemById(id);
   }
 
-  DateTime? nextExpiryForItem(int itemId) {
-    return _service.nextExpiryForItem(itemId);
+  List<StockBatch> stockRotationForItem(int itemId) {
+    return _purchaseController?.stockRotationForItem(itemId) ?? [];
   }
 
   bool isItemExpiringSoon(int itemId) {
-    return _service.isItemExpiringSoon(itemId);
+    return _purchaseController?.isItemExpiringSoon(itemId) ?? false;
+  }
+
+  DateTime? nextExpiryForItem(int itemId) {
+    return _purchaseController?.nextExpiryForItem(itemId);
   }
 
   Future<void> loadData() async {
@@ -173,100 +165,22 @@ class InventoryController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> setPurchaseFilter(PurchaseFilter filter) async {
-    _purchaseFilter = filter;
-    notifyListeners();
-  }
-
   Future<InventoryItem> addItem({
     required String name,
     required String category,
-    required int quantity,
     required double sellingPrice,
-    required double initialUnitCost,
     required int lowStockThreshold,
   }) async {
     try {
       return await _service.addItem(
         name: name,
         category: category,
-        quantity: quantity,
         sellingPrice: sellingPrice,
-        initialUnitCost: initialUnitCost,
         lowStockThreshold: lowStockThreshold,
       );
     } finally {
       notifyListeners();
     }
-  }
-
-  Future<void> addPurchase({
-    required int itemId,
-    required int quantity,
-    required double unitCost,
-    required DateTime purchasedAt,
-    DateTime? expiryDate,
-  }) async {
-    await _service.addPurchase(
-      itemId: itemId,
-      quantity: quantity,
-      unitCost: unitCost,
-      purchasedAt: purchasedAt,
-      expiryDate: expiryDate,
-    );
-    notifyListeners();
-  }
-
-  Future<void> addPurchaseForNewItem({
-    required String name,
-    required String category,
-    required int quantity,
-    required double unitCost,
-    required double sellingPrice,
-    required DateTime purchasedAt,
-    DateTime? expiryDate,
-    int? lowStockThreshold,
-  }) async {
-    await _service.addPurchaseForNewItem(
-      name: name,
-      category: category,
-      quantity: quantity,
-      unitCost: unitCost,
-      sellingPrice: sellingPrice,
-      purchasedAt: purchasedAt,
-      expiryDate: expiryDate,
-      lowStockThreshold: lowStockThreshold,
-    );
-    notifyListeners();
-  }
-
-  Future<void> updatePurchase({
-    required PurchaseEntry existing,
-    required int itemId,
-    required int quantity,
-    required double unitCost,
-    required DateTime purchasedAt,
-    DateTime? expiryDate,
-  }) async {
-    await _service.updatePurchase(
-      existing: existing,
-      itemId: itemId,
-      quantity: quantity,
-      unitCost: unitCost,
-      purchasedAt: purchasedAt,
-      expiryDate: expiryDate,
-    );
-    notifyListeners();
-  }
-
-  Future<void> cancelPurchase(int id, {String? reason}) async {
-    await _service.cancelPurchase(id, reason: reason);
-    notifyListeners();
-  }
-
-  Future<void> deletePurchaseHard(int id) async {
-    await _service.deletePurchaseHard(id);
-    notifyListeners();
   }
 
   Future<void> updateItem(InventoryItem updated) async {
@@ -275,6 +189,10 @@ class InventoryController extends ChangeNotifier {
   }
 
   Future<void> removeItem(int id) async {
+    final purchaseController = _purchaseController;
+    if (purchaseController != null) {
+      await purchaseController.deleteItemsPurchases(id);
+    }
     await _service.removeItem(id);
     notifyListeners();
   }
@@ -303,5 +221,3 @@ class InventoryController extends ChangeNotifier {
     notifyListeners();
   }
 }
-
-enum PurchaseFilter { all, active, cancelled }

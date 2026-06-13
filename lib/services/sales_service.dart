@@ -1,23 +1,37 @@
 import '../models/inventory_item.dart';
 import '../models/sales_entry.dart';
+import '../models/sales_entry_item.dart';
 import '../repositories/sales_repository.dart';
 import 'inventory_service.dart';
+import 'purchase_service.dart';
 
 class SalesService {
-  SalesService(this._repository, this._inventoryService);
+  SalesService(
+    this._repository,
+    this._inventoryService,
+    this._purchaseService,
+  );
 
   final SalesRepository _repository;
   final InventoryService _inventoryService;
+  final PurchaseService _purchaseService;
   final List<SalesEntry> _entries = [];
+  final List<SalesEntryItem> _entryItems = [];
 
   List<SalesEntry> get salesEntries => List.unmodifiable(_entries);
+
+  List<SalesEntryItem> get salesEntryItems => List.unmodifiable(_entryItems);
 
   Future<void> load() async {
     await _repository.init();
     final rows = await _repository.fetchSalesEntries();
+    final items = await _repository.fetchSalesEntryItems();
     _entries
       ..clear()
-      ..addAll(rows.where((entry) => entry.itemId > 0 && entry.quantity > 0));
+      ..addAll(rows);
+    _entryItems
+      ..clear()
+      ..addAll(items);
     _sortEntries();
   }
 
@@ -31,29 +45,46 @@ class SalesService {
       return;
     }
     final item = _requireItem(itemId);
-    await _inventoryService.consumeStock(
+    final cogs = _computeCogs(itemId, quantity);
+    await _purchaseService.consumeStock(
       itemId: itemId,
       quantity: quantity,
     );
 
+    final amount = quantity * item.sellingPrice;
+    final normalizedDate = _normalizeDate(entryDate);
     final entry = SalesEntry(
       id: 0,
+      entryDate: normalizedDate,
+      memo: memo,
+      amount: amount,
+    );
+    final entryId = await _repository.insertSalesEntry(entry);
+    final storedEntry = SalesEntry(
+      id: entryId,
+      entryDate: normalizedDate,
+      memo: memo,
+      amount: amount,
+    );
+    _entries.insert(0, storedEntry);
+
+    final lineItem = SalesEntryItem(
+      id: 0,
+      salesId: entryId,
       itemId: itemId,
       quantity: quantity,
       unitPrice: item.sellingPrice,
-      date: _normalizeDate(entryDate),
-      memo: memo,
+      costOfGoodsSold: cogs,
     );
-    final entryId = await _repository.insertSalesEntry(entry);
-    _entries.insert(
-      0,
-      SalesEntry(
-        id: entryId,
+    final lineItemId = await _repository.insertSalesEntryItem(lineItem);
+    _entryItems.add(
+      SalesEntryItem(
+        id: lineItemId,
+        salesId: entryId,
         itemId: itemId,
         quantity: quantity,
         unitPrice: item.sellingPrice,
-        date: _normalizeDate(entryDate),
-        memo: memo,
+        costOfGoodsSold: cogs,
       ),
     );
     _sortEntries();
@@ -74,33 +105,61 @@ class SalesService {
       return;
     }
 
-    final existing = _entries[index];
-    await _inventoryService.restockFromSale(
-      itemId: existing.itemId,
-      quantity: existing.quantity,
-    );
+    final existingItems =
+        _entryItems.where((item) => item.salesId == id).toList();
+    for (final item in existingItems) {
+      await _purchaseService.restockFromSale(
+        itemId: item.itemId,
+        quantity: item.quantity,
+      );
+    }
 
     try {
       final item = _requireItem(itemId);
-      await _inventoryService.consumeStock(
+      final cogs = _computeCogs(itemId, quantity);
+      await _purchaseService.consumeStock(
         itemId: itemId,
         quantity: quantity,
       );
+
+      final amount = quantity * item.sellingPrice;
+      final normalizedDate = _normalizeDate(entryDate);
       final updated = SalesEntry(
         id: id,
-        itemId: itemId,
-        quantity: quantity,
-        unitPrice: item.sellingPrice,
-        date: _normalizeDate(entryDate),
+        entryDate: normalizedDate,
         memo: memo,
+        amount: amount,
       );
       await _repository.updateSalesEntry(updated);
       _entries[index] = updated;
+
+      await _repository.deleteSalesEntryItemsBySales(id);
+      _entryItems.removeWhere((item) => item.salesId == id);
+
+      final lineItem = SalesEntryItem(
+        id: 0,
+        salesId: id,
+        itemId: itemId,
+        quantity: quantity,
+        unitPrice: item.sellingPrice,
+        costOfGoodsSold: cogs,
+      );
+      final lineItemId = await _repository.insertSalesEntryItem(lineItem);
+      _entryItems.add(
+        SalesEntryItem(
+          id: lineItemId,
+          salesId: id,
+          itemId: itemId,
+          quantity: quantity,
+          unitPrice: item.sellingPrice,
+          costOfGoodsSold: cogs,
+        ),
+      );
       _sortEntries();
     } catch (error) {
-      await _inventoryService.consumeStock(
-        itemId: existing.itemId,
-        quantity: existing.quantity,
+      await _purchaseService.consumeStock(
+        itemId: itemId,
+        quantity: quantity,
       );
       rethrow;
     }
@@ -111,25 +170,43 @@ class SalesService {
     if (index == -1) {
       return;
     }
-    final entry = _entries[index];
-    await _inventoryService.restockFromSale(
-      itemId: entry.itemId,
-      quantity: entry.quantity,
-    );
+    final existingItems =
+        _entryItems.where((item) => item.salesId == id).toList();
+    for (final item in existingItems) {
+      await _purchaseService.restockFromSale(
+        itemId: item.itemId,
+        quantity: item.quantity,
+      );
+    }
+    await _repository.deleteSalesEntryItemsBySales(id);
     await _repository.deleteSalesEntry(id);
     _entries.removeAt(index);
+    _entryItems.removeWhere((item) => item.salesId == id);
+  }
+
+  double _computeCogs(int itemId, int quantity) {
+    var remaining = quantity;
+    double total = 0;
+    final batches = _purchaseService.stockRotationForItem(itemId);
+    for (final batch in batches) {
+      if (remaining <= 0) {
+        break;
+      }
+      final deduct = remaining < batch.remainingQuantity
+          ? remaining
+          : batch.remainingQuantity;
+      total += deduct * batch.unitCost;
+      remaining -= deduct;
+    }
+    return total;
   }
 
   DateTime _normalizeDate(DateTime date) {
     return DateTime(date.year, date.month, date.day);
   }
 
-  bool _isSameDay(DateTime a, DateTime b) {
-    return a.year == b.year && a.month == b.month && a.day == b.day;
-  }
-
   void _sortEntries() {
-    _entries.sort((a, b) => b.date.compareTo(a.date));
+    _entries.sort((a, b) => b.entryDate.compareTo(a.entryDate));
   }
 
   InventoryItem _requireItem(int itemId) {

@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../models/sales_entry.dart';
+import '../models/sales_entry_item.dart';
 import '../services/sales_service.dart';
 
 class SalesController extends ChangeNotifier {
@@ -16,6 +17,8 @@ class SalesController extends ChangeNotifier {
   bool get isLoading => _isLoading;
 
   List<SalesEntry> get salesEntries => _service.salesEntries;
+
+  List<SalesEntryItem> get salesEntryItems => _service.salesEntryItems;
 
   Future<void> loadData() async {
     _isLoading = true;
