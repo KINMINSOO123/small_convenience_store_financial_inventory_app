@@ -4,7 +4,7 @@ import '../controllers/inventory_controller.dart';
 import '../controllers/sales_controller.dart';
 import '../models/sales_entry.dart';
 
-class SalesEntryDetailScreen extends StatelessWidget {
+class SalesEntryDetailScreen extends StatefulWidget {
   const SalesEntryDetailScreen({
     super.key,
     required this.sale,
@@ -16,11 +16,175 @@ class SalesEntryDetailScreen extends StatelessWidget {
   final SalesController controller;
   final InventoryController inventoryController;
 
+  @override
+  State<SalesEntryDetailScreen> createState() =>
+      _SalesEntryDetailScreenState();
+}
+
+class _SalesEntryDetailScreenState extends State<SalesEntryDetailScreen> {
+  SalesController get _controller => widget.controller;
+  InventoryController get _inventoryController => widget.inventoryController;
+
   String _formatDate(DateTime date) {
     final y = date.year.toString().padLeft(4, '0');
     final m = date.month.toString().padLeft(2, '0');
     final d = date.day.toString().padLeft(2, '0');
     return '$y-$m-$d';
+  }
+
+  Future<void> _addItem() async {
+    final items = _inventoryController.allItems;
+    if (items.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No items available.')),
+      );
+      return;
+    }
+
+    int selectedItemId = items.first.id;
+    final quantityController = TextEditingController();
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final selectedItem =
+                _inventoryController.getItemById(selectedItemId);
+            return AlertDialog(
+              title: const Text('Add item'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    DropdownButtonFormField<int>(
+                      value: selectedItemId,
+                      decoration: const InputDecoration(labelText: 'Item'),
+                      items: items
+                          .map(
+                            (item) => DropdownMenuItem<int>(
+                              value: item.id,
+                              child: Text(item.name),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (value) {
+                        if (value == null) return;
+                        setDialogState(() {
+                          selectedItemId = value;
+                        });
+                      },
+                    ),
+                    if (selectedItem != null) ...[
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Text(
+                            'Available: ${selectedItem.quantity}',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                          const SizedBox(width: 12),
+                          Text(
+                            'Price: \$${selectedItem.sellingPrice.toStringAsFixed(2)}',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ],
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: quantityController,
+                      decoration: const InputDecoration(
+                        labelText: 'Quantity sold',
+                      ),
+                      keyboardType: TextInputType.number,
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(false),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.of(context).pop(true),
+                  child: const Text('Add'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (result != true) return;
+
+    final quantity = int.tryParse(quantityController.text.trim());
+    if (quantity == null || quantity <= 0) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter a valid quantity.'),
+        ),
+      );
+      return;
+    }
+
+    final selectedItem = _inventoryController.getItemById(selectedItemId);
+    if (selectedItem == null) return;
+    if (quantity > selectedItem.quantity) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Only ${selectedItem.quantity} units available.'),
+        ),
+      );
+      return;
+    }
+
+    try {
+      await _controller.addLineItemToSale(
+        saleId: widget.sale.id,
+        itemId: selectedItemId,
+        quantity: quantity,
+      );
+    } on StateError catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.message)),
+      );
+    }
+  }
+
+  Future<void> _editMemo() async {
+    final sale = _controller.salesEntries
+        .firstWhere((s) => s.id == widget.sale.id);
+    final controller = TextEditingController(text: sale.memo);
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Edit memo'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(labelText: 'Memo'),
+          textInputAction: TextInputAction.done,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(controller.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (result == null) return;
+    await _controller.updateSalesEntryMemo(widget.sale.id, result);
   }
 
   @override
@@ -29,29 +193,39 @@ class SalesEntryDetailScreen extends StatelessWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('Sale ${_formatDate(sale.entryDate)}'),
+        title: Text('Sale ${_formatDate(widget.sale.salesDate)}'),
         actions: [
           PopupMenuButton<String>(
             onSelected: (value) async {
               if (value == 'delete') {
                 final confirmed = await _confirmDeleteSale(context);
                 if (confirmed == true) {
-                  await controller.deleteSale(sale.id);
+                  await _controller.deleteSale(widget.sale.id);
                   if (context.mounted) Navigator.of(context).pop();
                 }
+              } else if (value == 'edit_memo') {
+                await _editMemo();
               }
             },
             itemBuilder: (context) => const [
+              PopupMenuItem(value: 'edit_memo', child: Text('Edit memo')),
               PopupMenuItem(value: 'delete', child: Text('Delete')),
             ],
           ),
         ],
       ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _addItem,
+        icon: const Icon(Icons.add),
+        label: const Text('Add item'),
+      ),
       body: AnimatedBuilder(
-        animation: controller,
+        animation: _controller,
         builder: (context, _) {
-          final items = controller.salesEntryItemsForSale(sale.id);
-          final currentTotal = controller.totalForSale(sale.id);
+          final sale = _controller.salesEntries
+              .firstWhere((s) => s.id == widget.sale.id);
+          final items = _controller.salesEntryItemsForSale(sale.id);
+          final currentTotal = _controller.totalForSale(sale.id);
 
           return ListView(
             padding: const EdgeInsets.all(16),
@@ -63,7 +237,7 @@ class SalesEntryDetailScreen extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        _formatDate(sale.entryDate),
+                        _formatDate(sale.salesDate),
                         style: theme.textTheme.titleLarge,
                       ),
                       if (sale.memo.isNotEmpty) ...[
@@ -90,7 +264,7 @@ class SalesEntryDetailScreen extends StatelessWidget {
               else
                 ...items.map((item) {
                   final invItem =
-                      inventoryController.getItemById(item.itemId);
+                      _inventoryController.getItemById(item.itemId);
                   final name = invItem?.name ?? 'Item #${item.itemId}';
                   return Card(
                     child: ListTile(
@@ -134,7 +308,7 @@ class SalesEntryDetailScreen extends StatelessWidget {
       builder: (context) => AlertDialog(
         title: const Text('Delete sale'),
         content: Text(
-          'Delete sale for ${_formatDate(sale.entryDate)}?',
+          'Delete sale for ${_formatDate(widget.sale.salesDate)}?',
         ),
         actions: [
           TextButton(
@@ -150,3 +324,4 @@ class SalesEntryDetailScreen extends StatelessWidget {
     );
   }
 }
+

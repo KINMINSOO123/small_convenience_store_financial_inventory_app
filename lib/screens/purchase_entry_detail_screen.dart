@@ -4,7 +4,7 @@ import '../controllers/inventory_controller.dart';
 import '../controllers/purchase_controller.dart';
 import '../models/purchase_entry.dart';
 
-class PurchaseEntryDetailScreen extends StatelessWidget {
+class PurchaseEntryDetailScreen extends StatefulWidget {
   const PurchaseEntryDetailScreen({
     super.key,
     required this.purchase,
@@ -16,11 +16,196 @@ class PurchaseEntryDetailScreen extends StatelessWidget {
   final PurchaseController controller;
   final InventoryController inventoryController;
 
+  @override
+  State<PurchaseEntryDetailScreen> createState() =>
+      _PurchaseEntryDetailScreenState();
+}
+
+class _PurchaseEntryDetailScreenState
+    extends State<PurchaseEntryDetailScreen> {
+  PurchaseController get _controller => widget.controller;
+  InventoryController get _inventoryController => widget.inventoryController;
+
   String _formatDate(DateTime date) {
     final y = date.year.toString().padLeft(4, '0');
     final m = date.month.toString().padLeft(2, '0');
     final d = date.day.toString().padLeft(2, '0');
     return '$y-$m-$d';
+  }
+
+  Future<void> _addItem() async {
+    final items = _inventoryController.allItems;
+    if (items.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No items available.')),
+      );
+      return;
+    }
+
+    int selectedItemId = items.first.id;
+    final quantityController = TextEditingController();
+    final costController = TextEditingController();
+    DateTime? expiryDate;
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text('Add item'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    DropdownButtonFormField<int>(
+                      value: selectedItemId,
+                      decoration: const InputDecoration(labelText: 'Item'),
+                      items: items
+                          .map(
+                            (item) => DropdownMenuItem<int>(
+                              value: item.id,
+                              child: Text(item.name),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (value) {
+                        if (value == null) return;
+                        setDialogState(() {
+                          selectedItemId = value;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: quantityController,
+                      decoration: const InputDecoration(
+                        labelText: 'Quantity purchased',
+                      ),
+                      keyboardType: TextInputType.number,
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: costController,
+                      decoration: const InputDecoration(labelText: 'Unit cost'),
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            expiryDate == null
+                                ? 'No expiry date'
+                                : 'Expiry: ${_formatDate(expiryDate!)}',
+                          ),
+                        ),
+                        if (expiryDate != null)
+                          TextButton(
+                            onPressed: () {
+                              setDialogState(() {
+                                expiryDate = null;
+                              });
+                            },
+                            child: const Text('Clear'),
+                          ),
+                        TextButton(
+                          onPressed: () async {
+                            final picked = await showDatePicker(
+                              context: context,
+                              initialDate: expiryDate ?? DateTime.now(),
+                              firstDate: DateTime(2000),
+                              lastDate: DateTime(2100),
+                            );
+                            if (picked == null) return;
+                            setDialogState(() {
+                              expiryDate = picked;
+                            });
+                          },
+                          child: const Text('Pick date'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(false),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.of(context).pop(true),
+                  child: const Text('Add'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (result != true) return;
+
+    final quantity = int.tryParse(quantityController.text.trim());
+    final unitCost = double.tryParse(costController.text.trim());
+    if (quantity == null || unitCost == null || quantity <= 0) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter a valid quantity and cost.'),
+        ),
+      );
+      return;
+    }
+
+    try {
+      await _controller.addLineItemToPurchase(
+        purchaseId: widget.purchase.id,
+        itemId: selectedItemId,
+        quantity: quantity,
+        unitCost: unitCost,
+        expiryDate: expiryDate,
+      );
+    } on StateError catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.message)),
+      );
+    }
+  }
+
+  Future<void> _editMemo() async {
+    final purchase = _controller.allPurchases
+        .firstWhere((p) => p.id == widget.purchase.id);
+    final controller = TextEditingController(text: purchase.memo ?? '');
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Edit memo'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(labelText: 'Memo'),
+          textInputAction: TextInputAction.done,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(controller.text.trim()),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (result == null) return;
+    await _controller.updatePurchaseEntryMemo(widget.purchase.id,
+        result.isEmpty ? null : result);
   }
 
   @override
@@ -29,14 +214,31 @@ class PurchaseEntryDetailScreen extends StatelessWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text('Purchase ${_formatDate(purchase.purchasedAt)}'),
+        title: Text('Purchase ${_formatDate(widget.purchase.purchaseDate)}'),
+        actions: [
+          if (!widget.purchase.isCancelled)
+            IconButton(
+              onPressed: _editMemo,
+              icon: const Icon(Icons.edit_outlined),
+              tooltip: 'Edit memo',
+            ),
+        ],
       ),
+      floatingActionButton: widget.purchase.isCancelled
+          ? null
+          : FloatingActionButton.extended(
+              onPressed: _addItem,
+              icon: const Icon(Icons.add),
+              label: const Text('Add item'),
+            ),
       body: AnimatedBuilder(
-        animation: controller,
+        animation: _controller,
         builder: (context, _) {
+          final purchase = _controller.allPurchases
+              .firstWhere((p) => p.id == widget.purchase.id);
           final items =
-              controller.purchaseEntryItemsForPurchase(purchase.id);
-          final currentTotal = controller.totalForPurchase(purchase.id);
+              _controller.purchaseEntryItemsForPurchase(purchase.id);
+          final currentTotal = _controller.totalForPurchase(purchase.id);
 
           return ListView(
             padding: const EdgeInsets.all(16),
@@ -51,7 +253,7 @@ class PurchaseEntryDetailScreen extends StatelessWidget {
                         children: [
                           Expanded(
                             child: Text(
-                              _formatDate(purchase.purchasedAt),
+                              _formatDate(purchase.purchaseDate),
                               style: theme.textTheme.titleLarge,
                             ),
                           ),
@@ -113,7 +315,7 @@ class PurchaseEntryDetailScreen extends StatelessWidget {
               else
                 ...items.map((item) {
                   final invItem =
-                      inventoryController.getItemById(item.itemId);
+                      _inventoryController.getItemById(item.itemId);
                   final name = invItem?.name ?? 'Item #${item.itemId}';
                   return Card(
                     child: ListTile(
@@ -143,7 +345,7 @@ class PurchaseEntryDetailScreen extends StatelessWidget {
                         onPressed: () async {
                           final reason = await _promptCancelReason(context);
                           if (reason == null) return;
-                          await controller.cancelPurchase(
+                          await _controller.cancelPurchase(
                             purchase.id,
                             reason: reason,
                           );
@@ -160,7 +362,7 @@ class PurchaseEntryDetailScreen extends StatelessWidget {
                           final confirmed =
                               await _confirmDeletePurchase(context);
                           if (confirmed != true) return;
-                          await controller.deletePurchaseHard(purchase.id);
+                          await _controller.deletePurchaseHard(purchase.id);
                           if (context.mounted) Navigator.of(context).pop();
                         },
                         icon: const Icon(Icons.delete_outline),
@@ -223,3 +425,4 @@ class PurchaseEntryDetailScreen extends StatelessWidget {
     );
   }
 }
+

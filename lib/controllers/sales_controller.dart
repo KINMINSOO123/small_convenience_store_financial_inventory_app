@@ -28,6 +28,29 @@ class SalesController extends ChangeNotifier {
     return _service.salesEntryItemsForSale(salesId);
   }
 
+  SalesEntry? findSaleByDate(DateTime date) {
+    return _service.findSaleByDate(date);
+  }
+
+  Future<void> addLineItemToSale({
+    required int saleId,
+    required int itemId,
+    required int quantity,
+  }) async {
+    await _service.addLineItemToSale(
+      saleId: saleId,
+      itemId: itemId,
+      quantity: quantity,
+    );
+    onInventoryChanged?.call();
+    notifyListeners();
+  }
+
+  Future<void> updateSalesEntryMemo(int saleId, String memo) async {
+    await _service.updateSalesEntryMemo(saleId, memo);
+    notifyListeners();
+  }
+
   Future<void> loadData() async {
     _isLoading = true;
     notifyListeners();
@@ -40,13 +63,13 @@ class SalesController extends ChangeNotifier {
     required int itemId,
     required int quantity,
     required String memo,
-    required DateTime entryDate,
+    required DateTime salesDate,
   }) async {
     await _service.addSale(
       itemId: itemId,
       quantity: quantity,
       memo: memo,
-      entryDate: entryDate,
+      salesDate: salesDate,
     );
     onInventoryChanged?.call();
     notifyListeners();
@@ -57,14 +80,14 @@ class SalesController extends ChangeNotifier {
     required int itemId,
     required int quantity,
     required String memo,
-    required DateTime entryDate,
+    required DateTime salesDate,
   }) async {
     await _service.updateSale(
       id: id,
       itemId: itemId,
       quantity: quantity,
       memo: memo,
-      entryDate: entryDate,
+      salesDate: salesDate,
     );
     onInventoryChanged?.call();
     notifyListeners();

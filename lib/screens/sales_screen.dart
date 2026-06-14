@@ -53,7 +53,7 @@ class _SalesScreenState extends State<SalesScreen> {
       text: existingLineItem?.quantity.toString() ?? '',
     );
     final memoController = TextEditingController(text: existing?.memo ?? '');
-    DateTime entryDate = existing?.entryDate ?? DateTime.now();
+    DateTime salesDate = existing?.salesDate ?? DateTime.now();
 
     final result = await showDialog<bool>(
       context: context,
@@ -110,19 +110,19 @@ class _SalesScreenState extends State<SalesScreen> {
                     Row(
                       children: [
                         Expanded(
-                          child: Text('Date: ${_formatDate(entryDate)}'),
+                          child: Text('Date: ${_formatDate(salesDate)}'),
                         ),
                         TextButton(
                           onPressed: () async {
                             final picked = await showDatePicker(
                               context: context,
-                              initialDate: entryDate,
+                              initialDate: salesDate,
                               firstDate: DateTime(2000),
                               lastDate: DateTime(2100),
                             );
                             if (picked == null) return;
                             setDialogState(() {
-                              entryDate = picked;
+                              salesDate = picked;
                             });
                           },
                           child: const Text('Pick date'),
@@ -183,7 +183,7 @@ class _SalesScreenState extends State<SalesScreen> {
           itemId: selectedItemId,
           quantity: quantity,
           memo: memoController.text.trim(),
-          entryDate: entryDate,
+          salesDate: salesDate,
         );
       } else {
         await _controller.updateSale(
@@ -191,7 +191,7 @@ class _SalesScreenState extends State<SalesScreen> {
           itemId: selectedItemId,
           quantity: quantity,
           memo: memoController.text.trim(),
-          entryDate: entryDate,
+          salesDate: salesDate,
         );
       }
     } on StateError catch (error) {
@@ -266,7 +266,7 @@ class _SalesScreenState extends State<SalesScreen> {
       ]),
       builder: (context, _) {
         final sales = _controller.salesEntries
-            .where((entry) => _isWithinRange(entry.entryDate))
+            .where((entry) => _isWithinRange(entry.salesDate))
             .toList();
         final total = sales.fold<double>(
           0,
@@ -361,7 +361,7 @@ class _SalesScreenState extends State<SalesScreen> {
                                 child: const Icon(Icons.point_of_sale_outlined),
                               ),
                               title: Text(
-                                _formatDate(entry.entryDate),
+                                _formatDate(entry.salesDate),
                               ),
                               subtitle: Text(
                                 '\$${entryTotal.toStringAsFixed(2)} · $memo',

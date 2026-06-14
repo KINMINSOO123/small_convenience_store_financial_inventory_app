@@ -25,7 +25,7 @@ class ReportingService {
   }) {
     final purchasesInRange = purchases
         .where((purchase) => !purchase.isCancelled)
-        .where((purchase) => _isWithin(purchase.purchasedAt, start, end))
+        .where((purchase) => _isWithin(purchase.purchaseDate, start, end))
         .toList();
 
     final expensesInRange = expenses
@@ -33,7 +33,7 @@ class ReportingService {
         .toList();
 
     final salesInRange =
-      sales.where((entry) => _isWithin(entry.entryDate, start, end)).toList();
+      sales.where((entry) => _isWithin(entry.salesDate, start, end)).toList();
 
     final purchaseIdsInRange = purchasesInRange.map((p) => p.id).toSet();
 
@@ -195,12 +195,12 @@ class ReportingService {
     required Map<int, String> expenseCategoryByEntryId,
   }) {
     final purchaseIdToDate = {
-      for (final p in purchases) p.id: p.purchasedAt,
+      for (final p in purchases) p.id: p.purchaseDate,
     };
     final daily = <DateTime, _DailyAccumulator>{};
 
     for (final entry in sales) {
-      final date = _normalizeDate(entry.entryDate);
+      final date = _normalizeDate(entry.salesDate);
       final accumulator = daily.putIfAbsent(
         date,
         () => _DailyAccumulator(date: date),
@@ -250,9 +250,9 @@ class ReportingService {
     }
 
     for (final item in purchaseEntryItems) {
-      final purchasedAt = purchaseIdToDate[item.purchaseId];
-      if (purchasedAt == null) continue;
-      final date = _normalizeDate(purchasedAt);
+      final purchaseDate = purchaseIdToDate[item.purchaseId];
+      if (purchaseDate == null) continue;
+      final date = _normalizeDate(purchaseDate);
       final accumulator = daily.putIfAbsent(
         date,
         () => _DailyAccumulator(date: date),

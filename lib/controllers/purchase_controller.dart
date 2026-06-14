@@ -49,6 +49,33 @@ class PurchaseController extends ChangeNotifier {
     return _service.purchaseEntryItemsForPurchase(purchaseId);
   }
 
+  PurchaseEntry? findPurchaseByDate(DateTime date) {
+    return _service.findPurchaseByDate(date);
+  }
+
+  Future<void> addLineItemToPurchase({
+    required int purchaseId,
+    required int itemId,
+    required int quantity,
+    required double unitCost,
+    DateTime? expiryDate,
+  }) async {
+    await _service.addLineItemToPurchase(
+      purchaseId: purchaseId,
+      itemId: itemId,
+      quantity: quantity,
+      unitCost: unitCost,
+      expiryDate: expiryDate,
+    );
+    onInventoryChanged?.call();
+    notifyListeners();
+  }
+
+  Future<void> updatePurchaseEntryMemo(int purchaseId, String? memo) async {
+    await _service.updatePurchaseEntryMemo(purchaseId, memo);
+    notifyListeners();
+  }
+
   Future<void> loadData() async {
     _isLoading = true;
     notifyListeners();
@@ -66,14 +93,14 @@ class PurchaseController extends ChangeNotifier {
     required int itemId,
     required int quantity,
     required double unitCost,
-    required DateTime purchasedAt,
+    required DateTime purchaseDate,
     DateTime? expiryDate,
   }) async {
     final id = await _service.addPurchaseWithLineItem(
       itemId: itemId,
       quantity: quantity,
       unitCost: unitCost,
-      purchasedAt: purchasedAt,
+      purchaseDate: purchaseDate,
       expiryDate: expiryDate,
     );
     onInventoryChanged?.call();
@@ -86,7 +113,7 @@ class PurchaseController extends ChangeNotifier {
     required int itemId,
     required int quantity,
     required double unitCost,
-    required DateTime purchasedAt,
+    required DateTime purchaseDate,
     DateTime? expiryDate,
   }) async {
     await _service.updatePurchase(
@@ -94,7 +121,7 @@ class PurchaseController extends ChangeNotifier {
       itemId: itemId,
       quantity: quantity,
       unitCost: unitCost,
-      purchasedAt: purchasedAt,
+      purchaseDate: purchaseDate,
       expiryDate: expiryDate,
     );
     onInventoryChanged?.call();

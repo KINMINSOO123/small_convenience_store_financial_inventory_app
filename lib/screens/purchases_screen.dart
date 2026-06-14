@@ -347,7 +347,7 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
           itemId: newItem.id,
           quantity: quantity,
           unitCost: unitCost,
-          purchasedAt: purchaseDate,
+          purchaseDate: purchaseDate,
           expiryDate: expiryDate,
         );
       } catch (error) {
@@ -375,7 +375,7 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
         itemId: itemId,
         quantity: quantity,
         unitCost: unitCost,
-        purchasedAt: purchaseDate,
+        purchaseDate: purchaseDate,
         expiryDate: expiryDate,
       );
     } on StateError catch (error) {
@@ -448,7 +448,7 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
       animation: _controller,
       builder: (context, _) {
         final purchases = _controller.purchases
-            .where((entry) => _isWithinRange(entry.purchasedAt))
+            .where((entry) => _isWithinRange(entry.purchaseDate))
             .toList();
         final totalCost = purchases.fold<double>(
           0,
@@ -578,7 +578,7 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
                                 child: const Icon(Icons.receipt_long_outlined),
                               ),
                               title: Text(
-                                _formatDate(purchase.purchasedAt),
+                                _formatDate(purchase.purchaseDate),
                               ),
                               subtitle: Row(
                                 children: [

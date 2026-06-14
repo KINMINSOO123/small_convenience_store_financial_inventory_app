@@ -22,6 +22,19 @@ class SalesService {
 
   List<SalesEntryItem> get salesEntryItems => List.unmodifiable(_entryItems);
 
+  SalesEntry? findSaleByDate(DateTime date) {
+    final normalized = DateTime(date.year, date.month, date.day);
+    for (final entry in _entries) {
+      final entryDate = DateTime(
+        entry.salesDate.year,
+        entry.salesDate.month,
+        entry.salesDate.day,
+      );
+      if (entryDate == normalized) return entry;
+    }
+    return null;
+  }
+
   Future<void> load() async {
     await _repository.init();
     final rows = await _repository.fetchSalesEntries();
@@ -39,7 +52,7 @@ class SalesService {
     required int itemId,
     required int quantity,
     required String memo,
-    required DateTime entryDate,
+    required DateTime salesDate,
   }) async {
     if (quantity <= 0) {
       return;
@@ -52,21 +65,41 @@ class SalesService {
     );
 
     final amount = quantity * item.sellingPrice;
-    final normalizedDate = _normalizeDate(entryDate);
-    final entry = SalesEntry(
-      id: 0,
-      entryDate: normalizedDate,
-      memo: memo,
-      amount: amount,
-    );
-    final entryId = await _repository.insertSalesEntry(entry);
-    final storedEntry = SalesEntry(
-      id: entryId,
-      entryDate: normalizedDate,
-      memo: memo,
-      amount: amount,
-    );
-    _entries.insert(0, storedEntry);
+    final normalizedDate = _normalizeDate(salesDate);
+    final existing = findSaleByDate(normalizedDate);
+    int entryId;
+    double newAmount;
+    if (existing != null) {
+      entryId = existing.id;
+      newAmount = existing.amount + amount;
+      final updatedEntry = SalesEntry(
+        id: existing.id,
+        salesDate: existing.salesDate,
+        memo: existing.memo,
+        amount: newAmount,
+      );
+      await _repository.updateSalesEntry(updatedEntry);
+      final entryIndex = _entries.indexWhere((e) => e.id == existing.id);
+      if (entryIndex != -1) {
+        _entries[entryIndex] = updatedEntry;
+      }
+    } else {
+      newAmount = amount;
+      final entry = SalesEntry(
+        id: 0,
+        salesDate: normalizedDate,
+        memo: memo,
+        amount: newAmount,
+      );
+      entryId = await _repository.insertSalesEntry(entry);
+      final storedEntry = SalesEntry(
+        id: entryId,
+        salesDate: normalizedDate,
+        memo: memo,
+        amount: newAmount,
+      );
+      _entries.insert(0, storedEntry);
+    }
 
     final lineItem = SalesEntryItem(
       id: 0,
@@ -95,7 +128,7 @@ class SalesService {
     required int itemId,
     required int quantity,
     required String memo,
-    required DateTime entryDate,
+    required DateTime salesDate,
   }) async {
     final index = _entries.indexWhere((entry) => entry.id == id);
     if (index == -1) {
@@ -123,10 +156,10 @@ class SalesService {
       );
 
       final amount = quantity * item.sellingPrice;
-      final normalizedDate = _normalizeDate(entryDate);
+      final normalizedDate = _normalizeDate(salesDate);
       final updated = SalesEntry(
         id: id,
-        entryDate: normalizedDate,
+        salesDate: normalizedDate,
         memo: memo,
         amount: amount,
       );
@@ -196,6 +229,69 @@ class SalesService {
         .toList();
   }
 
+  Future<void> addLineItemToSale({
+    required int saleId,
+    required int itemId,
+    required int quantity,
+  }) async {
+    if (quantity <= 0) return;
+    final item = _requireItem(itemId);
+    final cogs = _computeCogs(itemId, quantity);
+    await _purchaseService.consumeStock(
+      itemId: itemId,
+      quantity: quantity,
+    );
+
+    final lineItem = SalesEntryItem(
+      id: 0,
+      salesId: saleId,
+      itemId: itemId,
+      quantity: quantity,
+      unitPrice: item.sellingPrice,
+      costOfGoodsSold: cogs,
+    );
+    final lineItemId = await _repository.insertSalesEntryItem(lineItem);
+    _entryItems.add(
+      SalesEntryItem(
+        id: lineItemId,
+        salesId: saleId,
+        itemId: itemId,
+        quantity: quantity,
+        unitPrice: item.sellingPrice,
+        costOfGoodsSold: cogs,
+      ),
+    );
+
+    final index = _entries.indexWhere((e) => e.id == saleId);
+    if (index != -1) {
+      final entry = _entries[index];
+      final newAmount = entry.amount + (quantity * item.sellingPrice);
+      final updatedEntry = SalesEntry(
+        id: entry.id,
+        salesDate: entry.salesDate,
+        memo: entry.memo,
+        amount: newAmount,
+      );
+      await _repository.updateSalesEntry(updatedEntry);
+      _entries[index] = updatedEntry;
+      _sortEntries();
+    }
+  }
+
+  Future<void> updateSalesEntryMemo(int saleId, String memo) async {
+    final index = _entries.indexWhere((e) => e.id == saleId);
+    if (index == -1) return;
+    final existing = _entries[index];
+    final updated = SalesEntry(
+      id: existing.id,
+      salesDate: existing.salesDate,
+      memo: memo,
+      amount: existing.amount,
+    );
+    await _repository.updateSalesEntry(updated);
+    _entries[index] = updated;
+  }
+
   double _computeCogs(int itemId, int quantity) {
     var remaining = quantity;
     double total = 0;
@@ -218,7 +314,7 @@ class SalesService {
   }
 
   void _sortEntries() {
-    _entries.sort((a, b) => b.entryDate.compareTo(a.entryDate));
+    _entries.sort((a, b) => b.salesDate.compareTo(a.salesDate));
   }
 
   InventoryItem _requireItem(int itemId) {

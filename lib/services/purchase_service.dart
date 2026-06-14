@@ -28,6 +28,19 @@ class PurchaseService {
     );
   }
 
+  PurchaseEntry? findPurchaseByDate(DateTime date) {
+    final normalized = DateTime(date.year, date.month, date.day);
+    for (final entry in _purchases) {
+      final entryDate = DateTime(
+        entry.purchaseDate.year,
+        entry.purchaseDate.month,
+        entry.purchaseDate.day,
+      );
+      if (entryDate == normalized && !entry.isCancelled) return entry;
+    }
+    return null;
+  }
+
   Future<void> load() async {
     await _repository.init();
     final purchaseEntries = await _repository.fetchPurchases();
@@ -45,12 +58,12 @@ class PurchaseService {
   }
 
   Future<int> addPurchase({
-    required DateTime purchasedAt,
+    required DateTime purchaseDate,
     String? memo,
   }) async {
     final purchase = PurchaseEntry(
       id: 0,
-      purchasedAt: purchasedAt,
+      purchaseDate: purchaseDate,
       memo: memo,
       status: 'ACTIVE',
       cancelReason: null,
@@ -58,7 +71,7 @@ class PurchaseService {
     final purchaseId = await _repository.insertPurchase(purchase);
     final storedPurchase = PurchaseEntry(
       id: purchaseId,
-      purchasedAt: purchasedAt,
+      purchaseDate: purchaseDate,
       memo: memo,
       status: 'ACTIVE',
       cancelReason: null,
@@ -71,17 +84,25 @@ class PurchaseService {
     required int itemId,
     required int quantity,
     required double unitCost,
-    required DateTime purchasedAt,
+    required DateTime purchaseDate,
     DateTime? expiryDate,
     String? memo,
   }) async {
     if (quantity <= 0) {
       throw StateError('Quantity must be greater than zero.');
     }
-    final purchaseId = await addPurchase(
-      purchasedAt: purchasedAt,
-      memo: memo,
-    );
+    final normalizedDate =
+        DateTime(purchaseDate.year, purchaseDate.month, purchaseDate.day);
+    final existing = findPurchaseByDate(normalizedDate);
+    int purchaseId;
+    if (existing != null) {
+      purchaseId = existing.id;
+    } else {
+      purchaseId = await addPurchase(
+        purchaseDate: normalizedDate,
+        memo: memo,
+      );
+    }
     final lineItem = PurchaseEntryItem(
       id: 0,
       purchaseId: purchaseId,
@@ -105,7 +126,7 @@ class PurchaseService {
       id: 0,
       itemId: itemId,
       purchaseId: purchaseId,
-      receivedAt: purchasedAt,
+      receivedAt: normalizedDate,
       quantity: quantity,
       remainingQuantity: quantity,
       unitCost: unitCost,
@@ -116,7 +137,7 @@ class PurchaseService {
       id: batchId,
       itemId: itemId,
       purchaseId: purchaseId,
-      receivedAt: purchasedAt,
+      receivedAt: normalizedDate,
       quantity: quantity,
       remainingQuantity: quantity,
       unitCost: unitCost,
@@ -133,7 +154,7 @@ class PurchaseService {
     required int itemId,
     required int quantity,
     required double unitCost,
-    required DateTime purchasedAt,
+    required DateTime purchaseDate,
     DateTime? expiryDate,
     String? memo,
   }) async {
@@ -147,7 +168,7 @@ class PurchaseService {
     await _repository.updatePurchase(
       PurchaseEntry(
         id: existing.id,
-        purchasedAt: purchasedAt,
+        purchaseDate: purchaseDate,
         memo: memo ?? existing.memo,
         status: 'ACTIVE',
         cancelReason: null,
@@ -194,7 +215,7 @@ class PurchaseService {
       id: 0,
       itemId: itemId,
       purchaseId: existing.id,
-      receivedAt: purchasedAt,
+      receivedAt: purchaseDate,
       quantity: quantity,
       remainingQuantity: quantity,
       unitCost: unitCost,
@@ -206,7 +227,7 @@ class PurchaseService {
         id: batchId,
         itemId: itemId,
         purchaseId: existing.id,
-        receivedAt: purchasedAt,
+        receivedAt: purchaseDate,
         quantity: quantity,
         remainingQuantity: quantity,
         unitCost: unitCost,
@@ -220,7 +241,7 @@ class PurchaseService {
     if (index != -1) {
       _purchases[index] = PurchaseEntry(
         id: existing.id,
-        purchasedAt: purchasedAt,
+        purchaseDate: purchaseDate,
         memo: memo ?? existing.memo,
         status: 'ACTIVE',
         cancelReason: null,
@@ -241,7 +262,7 @@ class PurchaseService {
     await _repository.updatePurchase(
       PurchaseEntry(
         id: purchase.id,
-        purchasedAt: purchase.purchasedAt,
+        purchaseDate: purchase.purchaseDate,
         memo: purchase.memo,
         status: 'CANCELLED',
         cancelReason: reason,
@@ -263,7 +284,7 @@ class PurchaseService {
 
     _purchases[index] = PurchaseEntry(
       id: purchase.id,
-      purchasedAt: purchase.purchasedAt,
+      purchaseDate: purchase.purchaseDate,
       memo: purchase.memo,
       status: 'CANCELLED',
       cancelReason: reason,
@@ -387,6 +408,79 @@ class PurchaseService {
     return _purchaseEntryItems
         .where((item) => item.purchaseId == purchaseId)
         .toList();
+  }
+
+  Future<void> addLineItemToPurchase({
+    required int purchaseId,
+    required int itemId,
+    required int quantity,
+    required double unitCost,
+    DateTime? expiryDate,
+  }) async {
+    if (quantity <= 0) {
+      throw StateError('Quantity must be greater than zero.');
+    }
+    final purchase = _purchases.firstWhere((p) => p.id == purchaseId);
+    if (purchase.isCancelled) {
+      throw StateError('Cannot add items to a cancelled purchase.');
+    }
+
+    final lineItem = PurchaseEntryItem(
+      id: 0,
+      purchaseId: purchaseId,
+      itemId: itemId,
+      quantity: quantity,
+      unitCost: unitCost,
+      expiryDate: expiryDate,
+    );
+    final lineItemId = await _repository.insertPurchaseEntryItem(lineItem);
+    _purchaseEntryItems.add(PurchaseEntryItem(
+      id: lineItemId,
+      purchaseId: purchaseId,
+      itemId: itemId,
+      quantity: quantity,
+      unitCost: unitCost,
+      expiryDate: expiryDate,
+    ));
+
+    final batch = StockBatch(
+      id: 0,
+      itemId: itemId,
+      purchaseId: purchaseId,
+      receivedAt: purchase.purchaseDate,
+      quantity: quantity,
+      remainingQuantity: quantity,
+      unitCost: unitCost,
+      expiryDate: expiryDate,
+    );
+    final batchId = await _repository.insertBatch(batch);
+    _batches.add(StockBatch(
+      id: batchId,
+      itemId: itemId,
+      purchaseId: purchaseId,
+      receivedAt: purchase.purchaseDate,
+      quantity: quantity,
+      remainingQuantity: quantity,
+      unitCost: unitCost,
+      expiryDate: expiryDate,
+    ));
+
+    await _updateItemQuantity(itemId, quantityDelta: quantity);
+  }
+
+  Future<void> updatePurchaseEntryMemo(int purchaseId, String? memo) async {
+    final index = _purchases.indexWhere((p) => p.id == purchaseId);
+    if (index == -1) return;
+    final existing = _purchases[index];
+    final updated = PurchaseEntry(
+      id: existing.id,
+      purchaseDate: existing.purchaseDate,
+      memo: memo,
+      status: existing.status,
+      cancelReason: existing.cancelReason,
+    );
+    await _repository.updatePurchase(updated);
+    _purchases[index] = updated;
   }
 
   int availableQuantityForItem(int itemId) {
