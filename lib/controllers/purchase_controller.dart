@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../models/purchase_entry.dart';
+import '../models/purchase_entry_item.dart';
 import '../models/stock_batch.dart';
 import '../services/purchase_service.dart';
 
@@ -35,7 +36,18 @@ class PurchaseController extends ChangeNotifier {
 
   List<StockBatch> get batches => List.unmodifiable(_service.batches);
 
+  List<PurchaseEntryItem> get purchaseEntryItems =>
+      _service.purchaseEntryItems;
+
   double get totalValue => _service.totalValue;
+
+  double totalForPurchase(int purchaseId) {
+    return _service.totalForPurchase(purchaseId);
+  }
+
+  List<PurchaseEntryItem> purchaseEntryItemsForPurchase(int purchaseId) {
+    return _service.purchaseEntryItemsForPurchase(purchaseId);
+  }
 
   Future<void> loadData() async {
     _isLoading = true;

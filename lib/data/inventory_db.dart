@@ -5,16 +5,18 @@ import '../models/inventory_item.dart';
 
 class InventoryDb {
   static const _dbName = 'inventory.db';
-  static const _dbVersion = 12;
+  static const _dbVersion = 15;
   static const _tableItems = 'inventory_items';
   static const _tableCategories = 'inventory_categories';
   static const _tableSettings = 'app_settings';
   static const _tablePurchases = 'purchase_entries';
+  static const _tablePurchaseItems = 'purchase_entry_items';
   static const _tableBatches = 'stock_batches';
   static const _tableAccounts = 'accounts';
   static const _tableJournalEntries = 'journal_entries';
   static const _tableJournalLines = 'journal_lines';
   static const _tableSalesEntries = 'sales_entries';
+  static const _tableSalesItems = 'sales_entry_items';
 
   Database? _database;
 
@@ -62,26 +64,47 @@ class InventoryDb {
         await db.execute(
           'CREATE TABLE $_tablePurchases('
           'id INTEGER PRIMARY KEY AUTOINCREMENT,'
-          'item_id INTEGER NOT NULL,'
-          'quantity INTEGER NOT NULL,'
-          'unit_cost REAL NOT NULL,'
           'purchased_at TEXT NOT NULL,'
+          'memo TEXT,'
           'status TEXT NOT NULL DEFAULT "ACTIVE",'
-          'cancel_reason TEXT,'
-          'expiry_date TEXT,'
-          'FOREIGN KEY(item_id) REFERENCES $_tableItems(id)'
+          'cancel_reason TEXT'
           ')',
         );
         await db.execute(
           'CREATE TABLE $_tableBatches('
           'id INTEGER PRIMARY KEY AUTOINCREMENT,'
           'item_id INTEGER NOT NULL,'
-          'purchase_id INTEGER,'
+          'purchase_item_id INTEGER,'
           'received_at TEXT NOT NULL,'
           'quantity INTEGER NOT NULL,'
           'remaining_qty INTEGER NOT NULL,'
           'unit_cost REAL NOT NULL,'
           'expiry_date TEXT,'
+          'FOREIGN KEY(item_id) REFERENCES $_tableItems(id)'
+          ')',
+        );
+        await db.execute(
+          'CREATE TABLE $_tablePurchaseItems('
+          'id INTEGER PRIMARY KEY AUTOINCREMENT,'
+          'purchase_id INTEGER NOT NULL,'
+          'item_id INTEGER NOT NULL,'
+          'quantity INTEGER NOT NULL,'
+          'unit_cost REAL NOT NULL,'
+          'expiry_date TEXT,'
+          'FOREIGN KEY(purchase_id) REFERENCES $_tablePurchases(id),'
+          'FOREIGN KEY(item_id) REFERENCES $_tableItems(id)'
+          ')',
+        );
+        await db.execute(
+          'CREATE TABLE $_tableSalesItems('
+          'id INTEGER PRIMARY KEY AUTOINCREMENT,'
+          'sales_id INTEGER NOT NULL,'
+          'item_id INTEGER NOT NULL,'
+          'quantity INTEGER NOT NULL,'
+          'unit_price REAL NOT NULL,'
+          'cost_of_goods_sold REAL NOT NULL DEFAULT 0,'
+          'subtotal REAL NOT NULL DEFAULT 0,'
+          'FOREIGN KEY(sales_id) REFERENCES $_tableSalesEntries(id),'
           'FOREIGN KEY(item_id) REFERENCES $_tableItems(id)'
           ')',
         );
@@ -115,13 +138,9 @@ class InventoryDb {
         await db.execute(
           'CREATE TABLE $_tableSalesEntries('
           'id INTEGER PRIMARY KEY AUTOINCREMENT,'
-          'item_id INTEGER NOT NULL,'
-          'quantity INTEGER NOT NULL,'
-          'unit_price REAL NOT NULL,'
           'entry_date TEXT NOT NULL,'
-          'amount REAL NOT NULL,'
           'memo TEXT,'
-          'FOREIGN KEY(item_id) REFERENCES $_tableItems(id)'
+          'amount REAL NOT NULL DEFAULT 0'
           ')',
         );
       },
@@ -138,14 +157,10 @@ class InventoryDb {
           await db.execute(
             'CREATE TABLE $_tablePurchases('
             'id INTEGER PRIMARY KEY AUTOINCREMENT,'
-            'item_id INTEGER NOT NULL,'
-            'quantity INTEGER NOT NULL,'
-            'unit_cost REAL NOT NULL,'
             'purchased_at TEXT NOT NULL,'
+            'memo TEXT,'
             'status TEXT NOT NULL DEFAULT "ACTIVE",'
-            'cancel_reason TEXT,'
-            'expiry_date TEXT,'
-            'FOREIGN KEY(item_id) REFERENCES $_tableItems(id)'
+            'cancel_reason TEXT'
             ')',
           );
           await db.execute(
@@ -287,6 +302,113 @@ class InventoryDb {
             'ALTER TABLE ${_tableItems}_new RENAME TO $_tableItems',
           );
         }
+        if (oldVersion < 13) {
+          await db.execute(
+            'CREATE TABLE $_tablePurchaseItems('
+            'id INTEGER PRIMARY KEY AUTOINCREMENT,'
+            'purchase_id INTEGER NOT NULL,'
+            'item_id INTEGER NOT NULL,'
+            'quantity INTEGER NOT NULL,'
+            'unit_cost REAL NOT NULL,'
+            'expiry_date TEXT,'
+            'FOREIGN KEY(purchase_id) REFERENCES $_tablePurchases(id),'
+            'FOREIGN KEY(item_id) REFERENCES $_tableItems(id)'
+            ')',
+          );
+          await db.execute(
+            'CREATE TABLE $_tableSalesItems('
+            'id INTEGER PRIMARY KEY AUTOINCREMENT,'
+            'sales_id INTEGER NOT NULL,'
+            'item_id INTEGER NOT NULL,'
+            'quantity INTEGER NOT NULL,'
+            'unit_price REAL NOT NULL,'
+            'cost_of_goods_sold REAL NOT NULL DEFAULT 0,'
+            'subtotal REAL NOT NULL DEFAULT 0,'
+            'FOREIGN KEY(sales_id) REFERENCES $_tableSalesEntries(id),'
+            'FOREIGN KEY(item_id) REFERENCES $_tableItems(id)'
+            ')',
+          );
+          try {
+            await db.execute(
+              'ALTER TABLE $_tableBatches ADD COLUMN purchase_item_id INTEGER',
+            );
+          } catch (e) {
+            // Ignore if column already exists
+          }
+          await db.execute(
+            'INSERT INTO $_tablePurchaseItems '
+            '(purchase_id, item_id, quantity, unit_cost, expiry_date) '
+            'SELECT id, item_id, quantity, unit_cost, expiry_date '
+            'FROM $_tablePurchases',
+          );
+          await db.execute(
+            'UPDATE $_tableBatches '
+            'SET purchase_item_id = ('
+            'SELECT $_tablePurchaseItems.id '
+            'FROM $_tablePurchaseItems '
+            'WHERE $_tablePurchaseItems.purchase_id = $_tableBatches.purchase_id'
+            ')',
+          );
+          await db.execute(
+            'INSERT INTO $_tableSalesItems '
+            '(sales_id, item_id, quantity, unit_price, cost_of_goods_sold, subtotal) '
+            'SELECT id, item_id, quantity, unit_price, 0, quantity * unit_price '
+            'FROM $_tableSalesEntries '
+            'WHERE item_id IS NOT NULL',
+          );
+        }
+        if (oldVersion < 14) {
+          await db.execute(
+            'CREATE TABLE ${_tableSalesEntries}_new('
+            'id INTEGER PRIMARY KEY AUTOINCREMENT,'
+            'entry_date TEXT NOT NULL,'
+            'memo TEXT,'
+            'amount REAL NOT NULL DEFAULT 0'
+            ')',
+          );
+          await db.execute(
+            'INSERT INTO ${_tableSalesEntries}_new '
+            '(id, entry_date, memo, amount) '
+            'SELECT id, entry_date, memo, amount '
+            'FROM $_tableSalesEntries',
+          );
+          await db.execute('DROP TABLE $_tableSalesEntries');
+          await db.execute(
+            'ALTER TABLE ${_tableSalesEntries}_new RENAME TO $_tableSalesEntries',
+          );
+        }
+        if (oldVersion < 15) {
+          // Restructure purchase_entries to a pure header table:
+          // drop item_id, quantity, unit_cost, expiry_date; add memo.
+          await db.execute(
+            'CREATE TABLE ${_tablePurchases}_new('
+            'id INTEGER PRIMARY KEY AUTOINCREMENT,'
+            'purchased_at TEXT NOT NULL,'
+            'memo TEXT,'
+            'status TEXT NOT NULL DEFAULT "ACTIVE",'
+            'cancel_reason TEXT'
+            ')',
+          );
+          await db.execute(
+            'INSERT INTO ${_tablePurchases}_new '
+            '(id, purchased_at, memo, status, cancel_reason) '
+            'SELECT id, purchased_at, NULL, status, cancel_reason '
+            'FROM $_tablePurchases',
+          );
+          // Migrate flat item data from old purchase_entries into
+          // purchase_entry_items for rows that don't already have a line item.
+          await db.execute(
+            'INSERT OR IGNORE INTO $_tablePurchaseItems '
+            '(purchase_id, item_id, quantity, unit_cost, expiry_date) '
+            'SELECT p.id, p.item_id, p.quantity, p.unit_cost, p.expiry_date '
+            'FROM $_tablePurchases p '
+            'WHERE p.item_id IS NOT NULL',
+          );
+          await db.execute('DROP TABLE $_tablePurchases');
+          await db.execute(
+            'ALTER TABLE ${_tablePurchases}_new RENAME TO $_tablePurchases',
+          );
+        }
       },
     );
   }
@@ -386,7 +508,12 @@ class InventoryDb {
 
   Future<void> deletePurchasesByItem(int itemId) async {
     final db = await database;
-    await db.delete(_tablePurchases, where: 'item_id = ?', whereArgs: [itemId]);
+    await db.rawDelete(
+      'DELETE FROM $_tablePurchases WHERE id IN ('
+      'SELECT purchase_id FROM $_tablePurchaseItems WHERE item_id = ?'
+      ')',
+      [itemId],
+    );
   }
 
   Future<void> deleteBatchesByItem(int itemId) async {
@@ -412,6 +539,45 @@ class InventoryDb {
   Future<void> deletePurchase(int id) async {
     final db = await database;
     await db.delete(_tablePurchases, where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<List<Map<String, Object?>>> fetchPurchaseEntryItems() async {
+    final db = await database;
+    return db.query(_tablePurchaseItems, orderBy: 'id ASC');
+  }
+
+  Future<List<Map<String, Object?>>> fetchPurchaseEntryItemsByPurchase(
+    int purchaseId,
+  ) async {
+    final db = await database;
+    return db.query(
+      _tablePurchaseItems,
+      where: 'purchase_id = ?',
+      whereArgs: [purchaseId],
+    );
+  }
+
+  Future<int> insertPurchaseEntryItem(Map<String, Object?> values) async {
+    final db = await database;
+    return db.insert(_tablePurchaseItems, values);
+  }
+
+  Future<void> deletePurchaseEntryItemsByPurchase(int purchaseId) async {
+    final db = await database;
+    await db.delete(
+      _tablePurchaseItems,
+      where: 'purchase_id = ?',
+      whereArgs: [purchaseId],
+    );
+  }
+
+  Future<void> deletePurchaseEntryItemsByItem(int itemId) async {
+    final db = await database;
+    await db.delete(
+      _tablePurchaseItems,
+      where: 'item_id = ?',
+      whereArgs: [itemId],
+    );
   }
 
   Future<List<Map<String, Object?>>> fetchBatches() async {
@@ -474,10 +640,12 @@ class InventoryDb {
   Future<void> clearAll() async {
     final db = await database;
     await db.delete(_tableBatches);
+    await db.delete(_tablePurchaseItems);
     await db.delete(_tablePurchases);
+    await db.delete(_tableSalesItems);
+    await db.delete(_tableSalesEntries);
     await db.delete(_tableJournalLines);
     await db.delete(_tableJournalEntries);
-    await db.delete(_tableSalesEntries);
     await db.delete(_tableAccounts);
     await db.delete(_tableItems);
     await db.delete(_tableCategories);
@@ -566,6 +734,45 @@ class InventoryDb {
   Future<void> deleteSalesEntry(int id) async {
     final db = await database;
     await db.delete(_tableSalesEntries, where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<List<Map<String, Object?>>> fetchSalesEntryItems() async {
+    final db = await database;
+    return db.query(_tableSalesItems, orderBy: 'id ASC');
+  }
+
+  Future<List<Map<String, Object?>>> fetchSalesEntryItemsBySales(
+    int salesId,
+  ) async {
+    final db = await database;
+    return db.query(
+      _tableSalesItems,
+      where: 'sales_id = ?',
+      whereArgs: [salesId],
+    );
+  }
+
+  Future<int> insertSalesEntryItem(Map<String, Object?> values) async {
+    final db = await database;
+    return db.insert(_tableSalesItems, values);
+  }
+
+  Future<void> deleteSalesEntryItemsBySales(int salesId) async {
+    final db = await database;
+    await db.delete(
+      _tableSalesItems,
+      where: 'sales_id = ?',
+      whereArgs: [salesId],
+    );
+  }
+
+  Future<void> deleteSalesEntryItemsByItem(int itemId) async {
+    final db = await database;
+    await db.delete(
+      _tableSalesItems,
+      where: 'item_id = ?',
+      whereArgs: [itemId],
+    );
   }
 
   Future<List<Map<String, Object?>>> fetchJournalLines() async {

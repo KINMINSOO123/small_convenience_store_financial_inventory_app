@@ -184,6 +184,18 @@ class SalesService {
     _entryItems.removeWhere((item) => item.salesId == id);
   }
 
+  double totalForSale(int salesId) {
+    return _entryItems
+        .where((item) => item.salesId == salesId)
+        .fold(0.0, (sum, item) => sum + item.subtotal);
+  }
+
+  List<SalesEntryItem> salesEntryItemsForSale(int salesId) {
+    return _entryItems
+        .where((item) => item.salesId == salesId)
+        .toList();
+  }
+
   double _computeCogs(int itemId, int quantity) {
     var remaining = quantity;
     double total = 0;

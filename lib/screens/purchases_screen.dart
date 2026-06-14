@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../controllers/inventory_controller.dart';
 import '../controllers/purchase_controller.dart';
-import '../models/purchase_entry.dart';
+import 'purchase_entry_detail_screen.dart';
 
 class PurchasesScreen extends StatefulWidget {
   const PurchasesScreen({
@@ -21,38 +21,33 @@ class PurchasesScreen extends StatefulWidget {
 class _PurchasesScreenState extends State<PurchasesScreen> {
   PurchaseController get _controller => widget.controller;
   InventoryController get _inventoryController => widget.inventoryController;
+  DateTime? _startDate;
+  DateTime? _endDate;
 
-  Future<void> _showPurchaseDialog({PurchaseEntry? existing}) async {
-    final quantityController = TextEditingController(
-      text: existing?.quantity.toString() ?? '',
-    );
-    final costController = TextEditingController(
-      text: existing == null ? '' : existing.unitCost.toStringAsFixed(2),
-    );
+  Future<void> _showAddDialog() async {
+    final quantityController = TextEditingController();
+    final costController = TextEditingController();
     final sellingPriceController = TextEditingController();
     final itemNameController = TextEditingController();
     final categoryController = TextEditingController();
     final thresholdController = TextEditingController(
       text: _inventoryController.lowStockThreshold.toString(),
     );
-    DateTime? expiryDate = existing?.expiryDate;
-    DateTime purchaseDate = existing?.purchasedAt ?? DateTime.now();
-    final existingItem = existing == null
-        ? null
-        : _inventoryController.getItemById(existing.itemId);
+    DateTime? expiryDate;
+    DateTime purchaseDate = DateTime.now();
     String? selectedCategory =
-        existingItem?.category ??
-        (_inventoryController.categories.isEmpty ? null : _inventoryController.categories.first);
-    int? selectedItemId = existing?.itemId;
-    bool createNewCategory = existing == null && _inventoryController.categories.isEmpty;
+        _inventoryController.categories.isEmpty
+            ? null
+            : _inventoryController.categories.first;
+    int? selectedItemId;
+    bool createNewCategory = _inventoryController.categories.isEmpty;
     bool createNewItem =
-        existing == null &&
-        (createNewCategory ||
-            selectedCategory == null ||
-            _inventoryController.itemsForCategory(selectedCategory).isEmpty);
-    final allowNewItem = existing == null;
-    if (!createNewItem && selectedCategory != null && selectedItemId == null) {
-      final categoryItems = _inventoryController.itemsForCategory(selectedCategory);
+        createNewCategory ||
+        selectedCategory == null ||
+        _inventoryController.itemsForCategory(selectedCategory).isEmpty;
+    if (!createNewItem && selectedItemId == null) {
+      final categoryItems =
+          _inventoryController.itemsForCategory(selectedCategory!);
       if (categoryItems.isNotEmpty) {
         selectedItemId = categoryItems.first.id;
       }
@@ -64,26 +59,12 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
         return StatefulBuilder(
           builder: (context, setDialogState) {
             return AlertDialog(
-              title: Text(existing == null ? 'Add purchase' : 'Edit purchase'),
+              title: const Text('Add purchase'),
               content: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    if (existing?.isCancelled ?? false)
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.errorContainer,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: const Text(
-                          'This purchase is cancelled. Editing is disabled.',
-                        ),
-                      ),
-                    if (existing?.isCancelled ?? false)
-                      const SizedBox(height: 12),
-                    if (allowNewItem)
+                    if (_inventoryController.categories.isEmpty)
                       SwitchListTile(
                         contentPadding: EdgeInsets.zero,
                         title: const Text('Create new category'),
@@ -96,7 +77,8 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
                               selectedCategory = null;
                               selectedItemId = null;
                             } else if (_inventoryController.categories.isNotEmpty) {
-                              selectedCategory = _inventoryController.categories.first;
+                              selectedCategory =
+                                  _inventoryController.categories.first;
                               final categoryItems = _inventoryController
                                   .itemsForCategory(selectedCategory!);
                               createNewItem = categoryItems.isEmpty;
@@ -107,7 +89,7 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
                           });
                         },
                       ),
-                    if (createNewCategory && allowNewItem)
+                    if (createNewCategory)
                       TextField(
                         controller: categoryController,
                         decoration: const InputDecoration(
@@ -129,24 +111,20 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
                               ),
                             )
                             .toList(),
-                        onChanged: allowNewItem
-                            ? (value) {
-                                if (value == null) {
-                                  return;
-                                }
-                                setDialogState(() {
-                                  selectedCategory = value;
-                                  final categoryItems = _inventoryController
-                                      .itemsForCategory(value);
-                                  createNewItem = categoryItems.isEmpty;
-                                  selectedItemId = categoryItems.isEmpty
-                                      ? null
-                                      : categoryItems.first.id;
-                                });
-                              }
-                            : null,
+                        onChanged: (value) {
+                          if (value == null) return;
+                          setDialogState(() {
+                            selectedCategory = value;
+                            final categoryItems = _inventoryController
+                                .itemsForCategory(value);
+                            createNewItem = categoryItems.isEmpty;
+                            selectedItemId = categoryItems.isEmpty
+                                ? null
+                                : categoryItems.first.id;
+                          });
+                        },
                       ),
-                    if (allowNewItem && !createNewCategory)
+                    if (!createNewCategory)
                       SwitchListTile(
                         contentPadding: EdgeInsets.zero,
                         title: const Text('Create new item'),
@@ -155,15 +133,15 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
                           final category = selectedCategory;
                           final hasItems =
                               category != null &&
-                              _inventoryController.itemsForCategory(category).isNotEmpty;
-                          if (!hasItems) {
-                            return;
-                          }
+                              _inventoryController
+                                  .itemsForCategory(category)
+                                  .isNotEmpty;
+                          if (!hasItems) return;
                           setDialogState(() {
                             createNewItem = value;
                             if (!value) {
                               selectedItemId = _inventoryController
-                                  .itemsForCategory(category)
+                                  .itemsForCategory(category!)
                                   .first
                                   .id;
                             }
@@ -172,16 +150,7 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
                       ),
                     if (!createNewItem && selectedCategory != null)
                       DropdownButtonFormField<int?>(
-                        value:
-                            selectedItemId ??
-                            (_inventoryController
-                                    .itemsForCategory(selectedCategory!)
-                                    .isEmpty
-                                ? null
-                                : _inventoryController
-                                      .itemsForCategory(selectedCategory!)
-                                      .first
-                                      .id),
+                        value: selectedItemId,
                         decoration: const InputDecoration(labelText: 'Item'),
                         items: _inventoryController
                             .itemsForCategory(selectedCategory!)
@@ -198,7 +167,7 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
                           });
                         },
                       ),
-                    if (createNewItem && allowNewItem) ...[
+                    if (createNewItem) ...[
                       if (!createNewCategory && selectedCategory != null)
                         InputDecorator(
                           decoration: const InputDecoration(
@@ -279,9 +248,7 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
                               firstDate: DateTime(2000),
                               lastDate: DateTime(2100),
                             );
-                            if (picked == null) {
-                              return;
-                            }
+                            if (picked == null) return;
                             setDialogState(() {
                               expiryDate = picked;
                             });
@@ -306,9 +273,7 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
                               firstDate: DateTime(2000),
                               lastDate: DateTime(2100),
                             );
-                            if (picked == null) {
-                              return;
-                            }
+                            if (picked == null) return;
                             setDialogState(() {
                               purchaseDate = picked;
                             });
@@ -321,50 +286,13 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
                 ),
               ),
               actions: [
-                if (existing != null)
-                  TextButton(
-                    onPressed: existing.isCancelled
-                        ? null
-                        : () async {
-                            final reason = await _promptCancelReason();
-                            if (reason == null) {
-                              return;
-                            }
-                            await _controller.cancelPurchase(
-                              existing.id,
-                              reason: reason,
-                            );
-                            if (!context.mounted) {
-                              return;
-                            }
-                            Navigator.of(context).pop(false);
-                          },
-                    child: const Text('Cancel purchase'),
-                  ),
-                if (existing != null)
-                  TextButton(
-                    onPressed: () async {
-                      final confirmed = await _confirmDeletePurchase();
-                      if (confirmed != true) {
-                        return;
-                      }
-                      await _controller.deletePurchaseHard(existing.id);
-                      if (!context.mounted) {
-                        return;
-                      }
-                      Navigator.of(context).pop(false);
-                    },
-                    child: const Text('Delete permanently'),
-                  ),
                 TextButton(
                   onPressed: () => Navigator.of(context).pop(false),
                   child: const Text('Cancel'),
                 ),
                 FilledButton(
-                  onPressed: (existing?.isCancelled ?? false)
-                      ? null
-                      : () => Navigator.of(context).pop(true),
-                  child: const Text('Save'),
+                  onPressed: () => Navigator.of(context).pop(true),
+                  child: const Text('Add'),
                 ),
               ],
             );
@@ -373,16 +301,13 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
       },
     );
 
-    if (result != true) {
-      return;
-    }
+    if (result != true) return;
+
     final quantity = int.tryParse(quantityController.text.trim());
     final unitCost = double.tryParse(costController.text.trim());
 
     if (quantity == null || unitCost == null || quantity <= 0) {
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Please enter a valid quantity and cost.'),
@@ -391,7 +316,7 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
       return;
     }
 
-    if (createNewItem && allowNewItem) {
+    if (createNewItem) {
       final name = itemNameController.text.trim();
       final category = createNewCategory
           ? categoryController.text.trim()
@@ -405,9 +330,7 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
           sellingPrice == null ||
           lowStockThreshold == null ||
           lowStockThreshold <= 0) {
-        if (!mounted) {
-          return;
-        }
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Please enter valid item details.')),
         );
@@ -428,9 +351,7 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
           expiryDate: expiryDate,
         );
       } catch (error) {
-        if (!mounted) {
-          return;
-        }
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Unable to add purchase: $error')),
         );
@@ -447,88 +368,22 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
         (fallbackItems == null || fallbackItems.isEmpty
             ? null
             : fallbackItems.first.id);
-    if (itemId == null) {
-      return;
-    }
+    if (itemId == null) return;
+
     try {
-      if (existing == null) {
-        await _controller.addPurchase(
-          itemId: itemId,
-          quantity: quantity,
-          unitCost: unitCost,
-          purchasedAt: purchaseDate,
-          expiryDate: expiryDate,
-        );
-      } else if (!existing.isCancelled) {
-        await _controller.updatePurchase(
-          existing: existing,
-          itemId: itemId,
-          quantity: quantity,
-          unitCost: unitCost,
-          purchasedAt: purchaseDate,
-          expiryDate: expiryDate,
-        );
-      }
+      await _controller.addPurchase(
+        itemId: itemId,
+        quantity: quantity,
+        unitCost: unitCost,
+        purchasedAt: purchaseDate,
+        expiryDate: expiryDate,
+      );
     } on StateError catch (error) {
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(error.message)),
       );
     }
-  }
-
-  Future<String?> _promptCancelReason() async {
-    final controller = TextEditingController();
-    return showDialog<String?>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Cancel purchase'),
-          content: TextField(
-            controller: controller,
-            decoration: const InputDecoration(labelText: 'Reason (optional)'),
-            textInputAction: TextInputAction.done,
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(null),
-              child: const Text('Dismiss'),
-            ),
-            FilledButton(
-              onPressed: () =>
-                  Navigator.of(context).pop(controller.text.trim()),
-              child: const Text('Cancel purchase'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Future<bool?> _confirmDeletePurchase() async {
-    return showDialog<bool>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Delete purchase'),
-          content: const Text(
-            'This permanently deletes the purchase and its stock effect. Continue?',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Delete'),
-            ),
-          ],
-        );
-      },
-    );
   }
 
   String _formatDate(DateTime date) {
@@ -538,19 +393,70 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
     return '$year-$month-$day';
   }
 
+  bool _isWithinRange(DateTime date) {
+    final start = _startDate;
+    final end = _endDate;
+    if (start == null && end == null) {
+      return true;
+    }
+    final normalized = DateTime(date.year, date.month, date.day);
+    final startNormalized = start == null
+        ? null
+        : DateTime(start.year, start.month, start.day);
+    final endNormalized = end == null
+        ? null
+        : DateTime(end.year, end.month, end.day);
+    if (startNormalized != null && normalized.isBefore(startNormalized)) {
+      return false;
+    }
+    if (endNormalized != null && normalized.isAfter(endNormalized)) {
+      return false;
+    }
+    return true;
+  }
+
+  String _dateLabel(DateTime? date, String fallback) {
+    return date == null ? fallback : _formatDate(date);
+  }
+
+  Future<void> _pickDateRange() async {
+    final range = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2000),
+      lastDate: DateTime(2100),
+      initialDateRange: _startDate != null && _endDate != null
+          ? DateTimeRange(start: _startDate!, end: _endDate!)
+          : null,
+    );
+    if (range == null) return;
+    setState(() {
+      _startDate = range.start;
+      _endDate = range.end;
+    });
+  }
+
+  void _clearDateFilter() {
+    setState(() {
+      _startDate = null;
+      _endDate = null;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, _) {
-        final purchases = _controller.purchases;
+        final purchases = _controller.purchases
+            .where((entry) => _isWithinRange(entry.purchasedAt))
+            .toList();
         final totalCost = purchases.fold<double>(
           0,
-          (sum, entry) => sum + (entry.quantity * entry.unitCost),
+          (sum, entry) => sum + _controller.totalForPurchase(entry.id),
         );
         return Scaffold(
           floatingActionButton: FloatingActionButton.extended(
-            onPressed: () => _showPurchaseDialog(),
+            onPressed: () => _showAddDialog(),
             icon: const Icon(Icons.add),
             label: const Text('Add purchase'),
           ),
@@ -582,7 +488,32 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
                         ],
                       ),
                     ),
-                    const SizedBox(height: 8),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 4,
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: _pickDateRange,
+                              child: Text(
+                                'Range ${_dateLabel(_startDate, 'Any')} - '
+                                '${_dateLabel(_endDate, 'Any')}',
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          IconButton(
+                            onPressed: _clearDateFilter,
+                            icon: const Icon(Icons.clear),
+                            tooltip: 'Clear date filter',
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 4),
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
                       child: Row(
@@ -608,9 +539,7 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
                                 ),
                               ],
                               onChanged: (value) {
-                                if (value == null) {
-                                  return;
-                                }
+                                if (value == null) return;
                                 _controller.setPurchaseFilter(value);
                               },
                             ),
@@ -632,13 +561,8 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
                           separatorBuilder: (_, __) => const Divider(height: 1),
                           itemBuilder: (context, index) {
                             final purchase = purchases[index];
-                            final item = _inventoryController.getItemById(
-                              purchase.itemId,
-                            );
-                            final name = item?.name ?? 'Unknown item';
-                            final expiryLabel = purchase.expiryDate == null
-                                ? 'No expiry'
-                                : 'Exp: ${_formatDate(purchase.expiryDate!)}';
+                            final total =
+                                _controller.totalForPurchase(purchase.id);
                             final statusLabel = purchase.isCancelled
                                 ? 'Cancelled'
                                 : 'Active';
@@ -651,57 +575,65 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
                                 backgroundColor: Theme.of(
                                   context,
                                 ).colorScheme.primaryContainer,
-                                child: Text(
-                                  name.isEmpty ? '?' : name[0].toUpperCase(),
-                                ),
+                                child: const Icon(Icons.receipt_long_outlined),
                               ),
-                              title: Text(name),
-                              subtitle: Padding(
-                                padding: const EdgeInsets.only(top: 4),
-                                child: Wrap(
-                                  spacing: 8,
-                                  runSpacing: 6,
-                                  children: [
-                                    _Pill(label: '${purchase.quantity} units'),
-                                    _Pill(label: expiryLabel),
-                                    _Pill(
-                                      label: _formatDate(purchase.purchasedAt),
-                                    ),
-                                    _Pill(label: statusLabel),
-                                    if (purchase.cancelReason != null &&
-                                        purchase.cancelReason!.isNotEmpty)
-                                      _Pill(
-                                        label:
-                                            'Reason: ${purchase.cancelReason}',
-                                      ),
-                                  ],
-                                ),
+                              title: Text(
+                                _formatDate(purchase.purchasedAt),
                               ),
-                              trailing: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                crossAxisAlignment: CrossAxisAlignment.end,
+                              subtitle: Row(
                                 children: [
-                                  Text(purchase.unitCost.toStringAsFixed(2)),
-                                  IconButton(
-                                    icon: const Icon(Icons.delete_outline),
-                                    onPressed: purchase.isCancelled
-                                        ? null
-                                        : () async {
-                                            final reason =
-                                                await _promptCancelReason();
-                                            if (reason == null) {
-                                              return;
-                                            }
-                                            await _controller.cancelPurchase(
-                                              purchase.id,
-                                              reason: reason,
-                                            );
-                                          },
+                                  Text(
+                                    '\$${total.toStringAsFixed(2)}',
+                                    style:
+                                        Theme.of(context).textTheme.titleMedium,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 2,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: purchase.isCancelled
+                                          ? Theme.of(context)
+                                              .colorScheme
+                                              .errorContainer
+                                          : Theme.of(context)
+                                              .colorScheme
+                                              .primaryContainer,
+                                      borderRadius: BorderRadius.circular(999),
+                                    ),
+                                    child: Text(
+                                      statusLabel,
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .labelSmall
+                                          ?.copyWith(
+                                            color: purchase.isCancelled
+                                                ? Theme.of(context).colorScheme
+                                                    .onErrorContainer
+                                                : Theme.of(context)
+                                                    .colorScheme
+                                                    .onPrimaryContainer,
+                                          ),
+                                    ),
                                   ),
                                 ],
                               ),
-                              onTap: () =>
-                                  _showPurchaseDialog(existing: purchase),
+                              trailing: const Icon(Icons.chevron_right),
+                              onTap: () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) =>
+                                        PurchaseEntryDetailScreen(
+                                      purchase: purchase,
+                                      controller: _controller,
+                                      inventoryController:
+                                          _inventoryController,
+                                    ),
+                                  ),
+                                );
+                              },
                             );
                           },
                         ),
@@ -756,24 +688,6 @@ class _InfoCard extends StatelessWidget {
           ],
         ),
       ),
-    );
-  }
-}
-
-class _Pill extends StatelessWidget {
-  const _Pill({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(label, style: Theme.of(context).textTheme.labelSmall),
     );
   }
 }

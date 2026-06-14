@@ -238,6 +238,8 @@ class _ReportingScreenState extends State<ReportingScreen> {
                                 _reportingService.buildDailyReport(
                                   date: _selectedDate,
                                   purchases: _purchaseController.allPurchases,
+                                  purchaseEntryItems:
+                                      _purchaseController.purchaseEntryItems,
                                   items: _inventoryController.allItems,
                                   expenses: _expensesController.expenseEntries,
                                   journalLines: _expensesController.journalLines,
@@ -301,6 +303,7 @@ class _ReportingScreenState extends State<ReportingScreen> {
       start: start,
       end: now,
       purchases: _purchaseController.allPurchases,
+      purchaseEntryItems: _purchaseController.purchaseEntryItems,
       items: _inventoryController.allItems,
       expenses: _expensesController.expenseEntries,
       journalLines: _expensesController.journalLines,

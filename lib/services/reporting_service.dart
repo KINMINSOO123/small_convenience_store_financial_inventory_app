@@ -3,6 +3,7 @@ import '../models/inventory_item.dart';
 import '../models/journal_entry.dart';
 import '../models/journal_line.dart';
 import '../models/purchase_entry.dart';
+import '../models/purchase_entry_item.dart';
 import '../models/sales_entry.dart';
 import '../models/sales_entry_item.dart';
 
@@ -11,6 +12,7 @@ class ReportingService {
     required DateTime start,
     required DateTime end,
     required List<PurchaseEntry> purchases,
+    required List<PurchaseEntryItem> purchaseEntryItems,
     required List<InventoryItem> items,
     required List<JournalEntry> expenses,
     required List<JournalLine> journalLines,
@@ -33,25 +35,32 @@ class ReportingService {
     final salesInRange =
       sales.where((entry) => _isWithin(entry.entryDate, start, end)).toList();
 
+    final purchaseIdsInRange = purchasesInRange.map((p) => p.id).toSet();
+
     final itemNames = {
       for (final item in items) item.id: item.name,
     };
     final purchaseTotals = <String, ReportLine>{};
     for (final purchase in purchasesInRange) {
-      final label = itemNames[purchase.itemId] ?? 'Item #${purchase.itemId}';
-      final total = purchase.quantity * purchase.unitCost;
-      purchaseTotals.update(
-        label,
-        (line) => line.copyWith(
-          quantity: line.quantity + purchase.quantity,
-          total: line.total + total,
-        ),
-        ifAbsent: () => ReportLine(
-          label: label,
-          quantity: purchase.quantity,
-          total: total,
-        ),
-      );
+      final itemsForPurchase =
+          purchaseEntryItems.where((i) => i.purchaseId == purchase.id);
+      for (final lineItem in itemsForPurchase) {
+        final label =
+            itemNames[lineItem.itemId] ?? 'Item #${lineItem.itemId}';
+        final total = lineItem.quantity * lineItem.unitCost;
+        purchaseTotals.update(
+          label,
+          (line) => line.copyWith(
+            quantity: line.quantity + lineItem.quantity,
+            total: line.total + total,
+          ),
+          ifAbsent: () => ReportLine(
+            label: label,
+            quantity: lineItem.quantity,
+            total: total,
+          ),
+        );
+      }
     }
 
     final expenseTotals = <String, ReportLine>{};
@@ -78,10 +87,9 @@ class ReportingService {
     final expenseLines = expenseTotals.values.toList()
       ..sort((a, b) => b.total.compareTo(a.total));
 
-    final purchasesTotal = purchasesInRange.fold<double>(
-      0,
-      (sum, entry) => sum + (entry.quantity * entry.unitCost),
-    );
+    final purchasesTotal = purchaseEntryItems
+        .where((item) => purchaseIdsInRange.contains(item.purchaseId))
+        .fold<double>(0, (sum, item) => sum + (item.quantity * item.unitCost));
     final expensesTotal = expensesInRange.fold<double>(
       0,
       (sum, entry) => sum + entry.total,
@@ -97,6 +105,7 @@ class ReportingService {
       start: start,
       end: end,
       purchases: purchasesInRange,
+      purchaseEntryItems: purchaseEntryItems,
       expenses: expensesInRange,
       sales: salesInRange,
       salesEntryItems: salesEntryItems,
@@ -124,10 +133,10 @@ class ReportingService {
     );
   }
 
-  /// Build a single-day report for [date]. If [date] is null, defaults to today.
   DailyReport buildDailyReport({
     DateTime? date,
     required List<PurchaseEntry> purchases,
+    required List<PurchaseEntryItem> purchaseEntryItems,
     required List<InventoryItem> items,
     required List<JournalEntry> expenses,
     required List<JournalLine> journalLines,
@@ -146,6 +155,7 @@ class ReportingService {
       start: start,
       end: end,
       purchases: purchases,
+      purchaseEntryItems: purchaseEntryItems,
       items: items,
       expenses: expenses,
       journalLines: journalLines,
@@ -177,12 +187,16 @@ class ReportingService {
     required DateTime start,
     required DateTime end,
     required List<PurchaseEntry> purchases,
+    required List<PurchaseEntryItem> purchaseEntryItems,
     required List<JournalEntry> expenses,
     required List<SalesEntry> sales,
     required List<SalesEntryItem> salesEntryItems,
     required Map<int, String> itemNames,
     required Map<int, String> expenseCategoryByEntryId,
   }) {
+    final purchaseIdToDate = {
+      for (final p in purchases) p.id: p.purchasedAt,
+    };
     final daily = <DateTime, _DailyAccumulator>{};
 
     for (final entry in sales) {
@@ -235,13 +249,15 @@ class ReportingService {
       );
     }
 
-    for (final entry in purchases) {
-      final date = _normalizeDate(entry.purchasedAt);
+    for (final item in purchaseEntryItems) {
+      final purchasedAt = purchaseIdToDate[item.purchaseId];
+      if (purchasedAt == null) continue;
+      final date = _normalizeDate(purchasedAt);
       final accumulator = daily.putIfAbsent(
         date,
         () => _DailyAccumulator(date: date),
       );
-      accumulator.purchasesTotal += entry.quantity * entry.unitCost;
+      accumulator.purchasesTotal += item.quantity * item.unitCost;
     }
 
     final reports = daily.values

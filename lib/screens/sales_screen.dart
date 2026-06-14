@@ -5,6 +5,7 @@ import '../controllers/sales_controller.dart';
 import '../models/inventory_item.dart';
 import '../models/sales_entry.dart';
 import '../models/sales_entry_item.dart';
+import 'sales_entry_detail_screen.dart';
 
 class SalesScreen extends StatefulWidget {
   const SalesScreen({
@@ -36,9 +37,7 @@ class _SalesScreenState extends State<SalesScreen> {
   Future<void> _showSaleDialog({SalesEntry? existing}) async {
     final items = _inventoryController.allItems;
     if (items.isEmpty) {
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Add inventory items before recording sales.'),
@@ -62,7 +61,7 @@ class _SalesScreenState extends State<SalesScreen> {
         return StatefulBuilder(
           builder: (context, setDialogState) {
             return AlertDialog(
-              title: Text(existing == null ? 'Add sale' : 'Edit sale'),
+              title: const Text('Add sale'),
               content: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -81,9 +80,7 @@ class _SalesScreenState extends State<SalesScreen> {
                           )
                           .toList(),
                       onChanged: (value) {
-                        if (value == null) {
-                          return;
-                        }
+                        if (value == null) return;
                         setDialogState(() {
                           selectedItemId = value;
                         });
@@ -123,9 +120,7 @@ class _SalesScreenState extends State<SalesScreen> {
                               firstDate: DateTime(2000),
                               lastDate: DateTime(2100),
                             );
-                            if (picked == null) {
-                              return;
-                            }
+                            if (picked == null) return;
                             setDialogState(() {
                               entryDate = picked;
                             });
@@ -153,15 +148,11 @@ class _SalesScreenState extends State<SalesScreen> {
       },
     );
 
-    if (result != true) {
-      return;
-    }
+    if (result != true) return;
 
     final quantity = int.tryParse(quantityController.text.trim());
     if (quantity == null || quantity <= 0) {
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Please enter a valid quantity.'),
@@ -171,17 +162,13 @@ class _SalesScreenState extends State<SalesScreen> {
     }
 
     final selectedItem = _inventoryController.getItemById(selectedItemId);
-    if (selectedItem == null) {
-      return;
-    }
+    if (selectedItem == null) return;
     final available = selectedItem.quantity +
         (existingLineItem != null && existingLineItem.itemId == selectedItemId
             ? existingLineItem.quantity
             : 0);
     if (quantity > available) {
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Only $available units available.'),
@@ -208,35 +195,11 @@ class _SalesScreenState extends State<SalesScreen> {
         );
       }
     } on StateError catch (error) {
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(error.message)),
       );
     }
-  }
-
-  Future<bool?> _confirmDeleteSale(String dateLabel) async {
-    return showDialog<bool>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Delete sale'),
-          content: Text('Delete sale for $dateLabel?'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Delete'),
-            ),
-          ],
-        );
-      },
-    );
   }
 
   String _formatDate(DateTime date) {
@@ -280,9 +243,7 @@ class _SalesScreenState extends State<SalesScreen> {
           ? DateTimeRange(start: _startDate!, end: _endDate!)
           : null,
     );
-    if (range == null) {
-      return;
-    }
+    if (range == null) return;
     setState(() {
       _startDate = range.start;
       _endDate = range.end;
@@ -309,11 +270,11 @@ class _SalesScreenState extends State<SalesScreen> {
             .toList();
         final total = sales.fold<double>(
           0,
-          (sum, entry) => sum + entry.amount,
+          (sum, entry) => sum + _controller.totalForSale(entry.id),
         );
         return Scaffold(
           floatingActionButton: FloatingActionButton.extended(
-            onPressed: _showSaleDialog,
+            onPressed: () => _showSaleDialog(),
             icon: const Icon(Icons.add),
             label: const Text('Add sale'),
           ),
@@ -383,15 +344,11 @@ class _SalesScreenState extends State<SalesScreen> {
                           separatorBuilder: (_, __) => const Divider(height: 1),
                           itemBuilder: (context, index) {
                             final entry = sales[index];
-                            final lineItem = _firstLineItem(entry);
-                            final item = lineItem == null
-                                ? null
-                                : _inventoryController.getItemById(
-                                    lineItem.itemId,
-                                  );
+                            final entryTotal =
+                                _controller.totalForSale(entry.id);
                             final memo = entry.memo.isEmpty
                                 ? 'Sale'
-                              : entry.memo;
+                                : entry.memo;
                             return ListTile(
                               contentPadding: const EdgeInsets.symmetric(
                                 horizontal: 16,
@@ -404,43 +361,25 @@ class _SalesScreenState extends State<SalesScreen> {
                                 child: const Icon(Icons.point_of_sale_outlined),
                               ),
                               title: Text(
-                                item?.name ??
-                                    'Item #${lineItem?.itemId ?? '?'}',
+                                _formatDate(entry.entryDate),
                               ),
                               subtitle: Text(
-                                '${_formatDate(entry.entryDate)} · '
-                                '${lineItem?.quantity ?? 0} units · $memo',
+                                '\$${entryTotal.toStringAsFixed(2)} · $memo',
                               ),
-                              trailing: PopupMenuButton<String>(
-                                onSelected: (value) async {
-                                  if (value == 'edit') {
-                                    await _showSaleDialog(existing: entry);
-                                  }
-                                  if (value == 'delete') {
-                                    final confirmed =
-                                        await _confirmDeleteSale(
-                                      _formatDate(entry.entryDate),
-                                    );
-                                    if (confirmed == true) {
-                                      await _controller.deleteSale(entry.id);
-                                    }
-                                  }
-                                },
-                                itemBuilder: (context) => const [
-                                  PopupMenuItem(
-                                    value: 'edit',
-                                    child: Text('Edit'),
+                              trailing: const Icon(Icons.chevron_right),
+                              onTap: () {
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) =>
+                                        SalesEntryDetailScreen(
+                                      sale: entry,
+                                      controller: _controller,
+                                      inventoryController:
+                                          _inventoryController,
+                                    ),
                                   ),
-                                  PopupMenuItem(
-                                    value: 'delete',
-                                    child: Text('Delete'),
-                                  ),
-                                ],
-                                child: const Padding(
-                                  padding: EdgeInsets.symmetric(vertical: 8),
-                                  child: Icon(Icons.more_vert),
-                                ),
-                              ),
+                                );
+                              },
                             );
                           },
                         ),

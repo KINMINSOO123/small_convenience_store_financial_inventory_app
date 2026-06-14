@@ -20,6 +20,14 @@ class SalesController extends ChangeNotifier {
 
   List<SalesEntryItem> get salesEntryItems => _service.salesEntryItems;
 
+  double totalForSale(int salesId) {
+    return _service.totalForSale(salesId);
+  }
+
+  List<SalesEntryItem> salesEntryItemsForSale(int salesId) {
+    return _service.salesEntryItemsForSale(salesId);
+  }
+
   Future<void> loadData() async {
     _isLoading = true;
     notifyListeners();
