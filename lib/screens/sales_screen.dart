@@ -46,9 +46,19 @@ class _SalesScreenState extends State<SalesScreen> {
       return;
     }
 
+    final categories = _inventoryController.categories;
     final existingLineItem =
         existing == null ? null : _firstLineItem(existing);
-    int selectedItemId = existingLineItem?.itemId ?? items.first.id;
+    String? selectedCategory;
+    int selectedItemId = 0;
+    if (existingLineItem != null) {
+      final existingItem =
+          _inventoryController.getItemById(existingLineItem.itemId);
+      if (existingItem != null) {
+        selectedCategory = existingItem.category;
+        selectedItemId = existingItem.id;
+      }
+    }
     final quantityController = TextEditingController(
       text: existingLineItem?.quantity.toString() ?? '',
     );
@@ -66,39 +76,66 @@ class _SalesScreenState extends State<SalesScreen> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    DropdownButtonFormField<int>(
-                      value: selectedItemId,
+                    DropdownButtonFormField<String>(
+                      value: selectedCategory,
                       decoration: const InputDecoration(
-                        labelText: 'Item',
+                        labelText: 'Category',
                       ),
-                      items: items
+                      items: categories
                           .map(
-                            (item) => DropdownMenuItem<int>(
-                              value: item.id,
-                              child: Text(item.name),
+                            (cat) => DropdownMenuItem<String>(
+                              value: cat,
+                              child: Text(cat),
                             ),
                           )
                           .toList(),
                       onChanged: (value) {
-                        if (value == null) return;
                         setDialogState(() {
-                          selectedItemId = value;
+                          selectedCategory = value;
+                          selectedItemId = 0;
                         });
                       },
                     ),
-                    const SizedBox(height: 12),
-                    _StockHint(
-                      item: _inventoryController.getItemById(selectedItemId),
-                      existingLineItem: existingLineItem,
-                    ),
-                    const SizedBox(height: 12),
-                    TextField(
-                      controller: quantityController,
-                      decoration: const InputDecoration(
-                        labelText: 'Quantity sold',
+                    if (selectedCategory != null) ...[
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<int>(
+                        value: selectedItemId == 0 ? null : selectedItemId,
+                        decoration: const InputDecoration(
+                          labelText: 'Item',
+                        ),
+                        items: _inventoryController
+                            .itemsForCategory(selectedCategory!)
+                            .map(
+                              (item) => DropdownMenuItem<int>(
+                                value: item.id,
+                                child: Text(item.name),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (value) {
+                          if (value == null) return;
+                          setDialogState(() {
+                            selectedItemId = value;
+                          });
+                        },
                       ),
-                      keyboardType: TextInputType.number,
-                    ),
+                    ],
+                    if (selectedItemId != 0) ...[
+                      const SizedBox(height: 12),
+                      _StockHint(
+                        item:
+                            _inventoryController.getItemById(selectedItemId),
+                        existingLineItem: existingLineItem,
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: quantityController,
+                        decoration: const InputDecoration(
+                          labelText: 'Quantity sold',
+                        ),
+                        keyboardType: TextInputType.number,
+                      ),
+                    ],
                     const SizedBox(height: 12),
                     TextField(
                       controller: memoController,
@@ -149,6 +186,22 @@ class _SalesScreenState extends State<SalesScreen> {
     );
 
     if (result != true) return;
+
+    if (selectedCategory == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select a category.')),
+      );
+      return;
+    }
+
+    if (selectedItemId == 0) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select an item.')),
+      );
+      return;
+    }
 
     final quantity = int.tryParse(quantityController.text.trim());
     if (quantity == null || quantity <= 0) {
@@ -340,6 +393,7 @@ class _SalesScreenState extends State<SalesScreen> {
                     else
                       Expanded(
                         child: ListView.separated(
+                          padding: const EdgeInsets.only(bottom: 80),
                           itemCount: sales.length,
                           separatorBuilder: (_, __) => const Divider(height: 1),
                           itemBuilder: (context, index) {

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../controllers/inventory_controller.dart';
 import '../models/inventory_item.dart';
-import '../models/stock_batch.dart';
+import 'inventory_item_detail_screen.dart';
 
 class InventoryScreen extends StatefulWidget {
   const InventoryScreen({super.key, required this.controller});
@@ -263,60 +263,6 @@ class _InventoryScreenState extends State<InventoryScreen> {
     }
   }
 
-  Future<void> _showStockRotationDialog(InventoryItem item) async {
-    final batches = _controller.stockRotationForItem(item.id);
-    await showDialog<void>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: Text(item.name),
-          content: SizedBox(
-            width: double.maxFinite,
-            child: batches.isEmpty
-                ? const Text('No stock available for this item.')
-                : ListView.separated(
-                    shrinkWrap: true,
-                    itemCount: batches.length,
-                    separatorBuilder: (_, __) => const Divider(height: 1),
-                    itemBuilder: (context, index) {
-                      final batch = batches[index];
-                      return ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        leading: CircleAvatar(child: Text('${index + 1}')),
-                        title: Text(
-                          index == 0 ? 'Sell first' : 'Sell next',
-                        ),
-                        subtitle: Wrap(
-                          spacing: 8,
-                          runSpacing: 6,
-                          children: [
-                            _Pill(label: '${batch.remainingQuantity} units'),
-                            _Pill(label: _expiryLabel(batch)),
-                            _Pill(
-                              label:
-                                  'Purchased ${_formatDate(batch.receivedAt)}',
-                            ),
-                            _Pill(
-                              label:
-                                  'Value ${(batch.remainingQuantity * batch.unitCost).toStringAsFixed(2)}',
-                            ),
-                          ],
-                        ),
-                      );
-                    },
-                  ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Close'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
   Future<bool?> _confirmDeleteItem(String name) async {
     return showDialog<bool>(
       context: context,
@@ -339,20 +285,6 @@ class _InventoryScreenState extends State<InventoryScreen> {
     );
   }
 
-  String _formatDate(DateTime date) {
-    final year = date.year.toString().padLeft(4, '0');
-    final month = date.month.toString().padLeft(2, '0');
-    final day = date.day.toString().padLeft(2, '0');
-    return '$year-$month-$day';
-  }
-
-  String _expiryLabel(StockBatch batch) {
-    final expiry = batch.expiryDate;
-    if (expiry == null) {
-      return 'No expiry';
-    }
-    return 'Expires ${_formatDate(expiry)}';
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -502,6 +434,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                         child: Text('No items yet. Tap "Add item" to start.'),
                       )
                     : ListView.separated(
+                        padding: const EdgeInsets.only(bottom: 80),
                         itemCount: categoryItems.length,
                         separatorBuilder: (_, __) => const Divider(height: 1),
                         itemBuilder: (context, index) {
@@ -527,6 +460,9 @@ class _InventoryScreenState extends State<InventoryScreen> {
                                 children: [
                                   _Pill(label: item.category),
                                   _Pill(label: '${item.quantity} units'),
+                                  _Pill(
+                                    label: 'Value ${_controller.stockValueForItem(item.id).toStringAsFixed(2)}',
+                                  ),
                                   _Pill(
                                     label: 'Low at ${item.lowStockThreshold}',
                                   ),
@@ -568,7 +504,16 @@ class _InventoryScreenState extends State<InventoryScreen> {
                                 ),
                               ],
                             ),
-                            onTap: () => _showStockRotationDialog(item),
+                            onTap: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) => InventoryItemDetailScreen(
+                                    item: item,
+                                    controller: _controller,
+                                  ),
+                                ),
+                              );
+                            },
                           );
                         },
                       ),
@@ -605,6 +550,7 @@ class _CategoryList extends StatelessWidget {
     }
 
     return ListView.separated(
+      padding: const EdgeInsets.only(bottom: 80),
       itemCount: categories.length,
       separatorBuilder: (_, __) => const Divider(height: 1),
       itemBuilder: (context, index) {

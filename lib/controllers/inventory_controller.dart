@@ -70,6 +70,16 @@ class InventoryController extends ChangeNotifier {
         .fold(0, (sum, item) => sum + item.quantity);
   }
 
+  double stockValueForItem(int itemId) {
+    final purchaseController = _purchaseController;
+    if (purchaseController == null) {
+      return 0;
+    }
+    return purchaseController.batches
+        .where((batch) => batch.itemId == itemId && batch.remainingQuantity > 0)
+        .fold(0.0, (sum, batch) => sum + batch.remainingQuantity * batch.unitCost);
+  }
+
   double stockValueForCategory(String category) {
     final purchaseController = _purchaseController;
     if (purchaseController == null) {

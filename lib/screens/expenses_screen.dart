@@ -24,10 +24,12 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
       text: existing == null ? '' : existing.total.toStringAsFixed(2),
     );
     final memoController = TextEditingController(text: existing?.memo ?? '');
+    final categoryController = TextEditingController(
+      text: existing == null
+          ? ''
+          : _expenseAccountForEntry(existing)?.name ?? '',
+    );
     DateTime entryDate = existing?.date ?? DateTime.now();
-    Account? selectedAccount = existing == null
-        ? _controller.defaultExpenseAccount
-        : _expenseAccountForEntry(existing);
 
     final result = await showDialog<bool>(
       context: context,
@@ -40,24 +42,12 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    DropdownButtonFormField<Account>(
-                      value: selectedAccount,
+                    TextField(
+                      controller: categoryController,
                       decoration: const InputDecoration(
                         labelText: 'Expense category',
                       ),
-                      items: _controller.expenseAccounts
-                          .map(
-                            (account) => DropdownMenuItem<Account>(
-                              value: account,
-                              child: Text(account.name),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: (value) {
-                        setDialogState(() {
-                          selectedAccount = value;
-                        });
-                      },
+                      textInputAction: TextInputAction.next,
                     ),
                     const SizedBox(height: 12),
                     TextField(
@@ -138,21 +128,23 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
       return;
     }
 
-    if (selectedAccount == null) {
+    final categoryName = categoryController.text.trim();
+    if (categoryName.isEmpty) {
       if (!mounted) {
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Please select an expense category.'),
+          content: Text('Please enter an expense category.'),
         ),
       );
       return;
     }
 
+    final account = await _controller.addAccount(categoryName);
     if (existing == null) {
       await _controller.addExpense(
-        expenseAccountId: selectedAccount!.id,
+        expenseAccountId: account.id,
         amount: amount,
         memo: memoController.text.trim(),
         entryDate: entryDate,
@@ -162,7 +154,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
 
     await _controller.updateExpense(
       entryId: existing.id,
-      expenseAccountId: selectedAccount!.id,
+      expenseAccountId: account.id,
       amount: amount,
       memo: memoController.text.trim(),
       entryDate: entryDate,
@@ -351,6 +343,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                     else
                       Expanded(
                         child: ListView.separated(
+                          padding: const EdgeInsets.only(bottom: 80),
                           itemCount: expenses.length,
                           separatorBuilder: (_, __) => const Divider(height: 1),
                           itemBuilder: (context, index) {

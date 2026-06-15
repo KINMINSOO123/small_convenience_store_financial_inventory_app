@@ -391,7 +391,7 @@ class _SalesEntryDetailScreenState extends State<SalesEntryDetailScreen> {
           final currentTotal = _controller.totalForSale(sale.id);
 
           return ListView(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
             children: [
               Card(
                 child: Padding(

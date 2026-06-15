@@ -70,4 +70,10 @@ class ExpensesController extends ChangeNotifier {
     await _service.deleteExpense(entryId);
     notifyListeners();
   }
+
+  Future<Account> addAccount(String name) async {
+    final account = await _service.addAccount(name);
+    notifyListeners();
+    return account;
+  }
 }

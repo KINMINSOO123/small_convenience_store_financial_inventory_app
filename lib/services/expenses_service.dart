@@ -114,6 +114,17 @@ class ExpensesService {
     _lines.removeWhere((line) => line.entryId == entryId);
   }
 
+  Future<Account> addAccount(String name) async {
+    for (final a in _accounts) {
+      if (a.name.toLowerCase() == name.toLowerCase()) return a;
+    }
+    final account = Account(id: 0, name: name, type: 'expense');
+    final id = await _repository.insertAccount(account);
+    final stored = Account(id: id, name: name, type: 'expense');
+    _accounts.add(stored);
+    return stored;
+  }
+
   Future<void> _seedDefaultAccounts() async {
     final defaults = <Account>[
       Account(id: 0, name: 'Cash', type: 'asset'),

@@ -1,8 +1,4 @@
-import 'dart:io';
-
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
-import 'package:csv/csv.dart';
 
 import '../controllers/expenses_controller.dart';
 import '../controllers/inventory_controller.dart';
@@ -30,8 +26,6 @@ class HomeShell extends StatefulWidget {
   State<HomeShell> createState() => _HomeShellState();
 }
 
-enum _CsvType { inventory, unknown }
-
 class _HomeShellState extends State<HomeShell> {
   late final InventoryDb _database = InventoryDb();
   late final InventoryRepository _inventoryRepository =
@@ -48,7 +42,10 @@ class _HomeShellState extends State<HomeShell> {
   late final PurchaseService _purchaseService =
       PurchaseService(_purchaseRepository, _inventoryService);
   late final InventoryController _inventoryController =
-      InventoryController(inventoryService: _inventoryService);
+      InventoryController(
+        inventoryService: _inventoryService,
+        purchaseController: _purchaseController,
+      );
   late final PurchaseController _purchaseController =
       PurchaseController(
         purchaseService: _purchaseService,
@@ -96,139 +93,6 @@ class _HomeShellState extends State<HomeShell> {
     ]);
   }
 
-  Future<void> _showThresholdDialog() async {
-    final controller = TextEditingController(
-      text: _inventoryController.lowStockThreshold.toString(),
-    );
-    final result = await showDialog<bool>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Low stock threshold'),
-          content: TextField(
-            controller: controller,
-            decoration: const InputDecoration(
-              labelText: 'Units at or below',
-            ),
-            keyboardType: TextInputType.number,
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Save'),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (result != true) {
-      return;
-    }
-
-    final value = int.tryParse(controller.text.trim());
-    if (value == null || value <= 0) {
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please enter a valid number greater than 0.'),
-        ),
-      );
-      return;
-    }
-
-    await _inventoryController.setLowStockThreshold(value);
-  }
-
-  Future<void> _showExportDialog() async {
-    final paths = await _inventoryController.exportCsvFiles();
-    if (!mounted) {
-      return;
-    }
-    await showDialog<void>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          title: const Text('Export CSV files'),
-          content: SizedBox(
-            width: double.maxFinite,
-            child: SelectableText(
-              'Inventory CSV:\n${paths['inventory']}\n\n',
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Close'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Future<void> _showImportDialog() async {
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowMultiple: true,
-      allowedExtensions: const ['csv'],
-    );
-    if (result == null || result.files.isEmpty) {
-      return;
-    }
-
-    String? inventoryCsv;
-
-    for (final file in result.files) {
-      final path = file.path;
-      if (path == null) {
-        continue;
-      }
-      final content = await File(path).readAsString();
-      final type = _detectCsvType(content);
-      if (type == _CsvType.inventory) {
-        inventoryCsv = content;
-      }
-    }
-
-    if (inventoryCsv == null) {
-      if (!mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Please select an inventory CSV file.'),
-        ),
-      );
-      return;
-    }
-
-    await _inventoryController.importCsvFiles(
-      inventoryCsv: inventoryCsv,
-      purchasesCsv: '',
-    );
-  }
-
-  _CsvType _detectCsvType(String csv) {
-    final rows = const CsvToListConverter().convert(csv);
-    if (rows.isEmpty) {
-      return _CsvType.unknown;
-    }
-    final headers = rows.first
-        .map((value) => value.toString().trim().toLowerCase())
-        .toList();
-    if (headers.contains('category') && headers.contains('unit_cost')) {
-      return _CsvType.inventory;
-    }
-    return _CsvType.unknown;
-  }
-
   List<Widget> get _screens => [
         InventoryScreen(controller: _inventoryController),
         PurchasesScreen(
@@ -262,34 +126,6 @@ class _HomeShellState extends State<HomeShell> {
     return Scaffold(
       appBar: AppBar(
         title: Text(title),
-        actions: [
-          if (_index == 0)
-            IconButton(
-              onPressed: _showThresholdDialog,
-              icon: const Icon(Icons.tune),
-              tooltip: 'Low stock threshold',
-            ),
-          PopupMenuButton<String>(
-            onSelected: (value) {
-              if (value == 'export') {
-                _showExportDialog();
-              }
-              if (value == 'import') {
-                _showImportDialog();
-              }
-            },
-            itemBuilder: (context) => const [
-              PopupMenuItem(
-                value: 'export',
-                child: Text('Export CSV'),
-              ),
-              PopupMenuItem(
-                value: 'import',
-                child: Text('Import CSV'),
-              ),
-            ],
-          ),
-        ],
       ),
       body: _screens[_index],
       bottomNavigationBar: NavigationBar(

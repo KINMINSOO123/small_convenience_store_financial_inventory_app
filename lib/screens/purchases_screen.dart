@@ -557,6 +557,7 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
                     else
                       Expanded(
                         child: ListView.separated(
+                          padding: const EdgeInsets.only(bottom: 80),
                           itemCount: purchases.length,
                           separatorBuilder: (_, __) => const Divider(height: 1),
                           itemBuilder: (context, index) {
