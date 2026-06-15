@@ -76,6 +76,35 @@ class PurchaseController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> deleteLineItemFromPurchase(
+    int purchaseId,
+    int lineItemId,
+  ) async {
+    await _service.deleteLineItemFromPurchase(purchaseId, lineItemId);
+    onInventoryChanged?.call();
+    notifyListeners();
+  }
+
+  Future<void> updateLineItemInPurchase({
+    required int purchaseId,
+    required int lineItemId,
+    required int itemId,
+    required int quantity,
+    required double unitCost,
+    DateTime? expiryDate,
+  }) async {
+    await _service.updateLineItemInPurchase(
+      purchaseId: purchaseId,
+      lineItemId: lineItemId,
+      itemId: itemId,
+      quantity: quantity,
+      unitCost: unitCost,
+      expiryDate: expiryDate,
+    );
+    onInventoryChanged?.call();
+    notifyListeners();
+  }
+
   Future<void> loadData() async {
     _isLoading = true;
     notifyListeners();

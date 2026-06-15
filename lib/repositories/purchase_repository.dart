@@ -66,6 +66,16 @@ class PurchaseRepository {
     await _database.deletePurchaseEntryItemsByItem(itemId);
   }
 
+  Future<void> deletePurchaseEntryItem(int id) async {
+    await _database.deletePurchaseEntryItem(id);
+  }
+
+  Future<void> updatePurchaseEntryItem(PurchaseEntryItem item) async {
+    final map = item.toMap();
+    final id = map.remove('id') as int? ?? item.id;
+    await _database.updatePurchaseEntryItem(map, id);
+  }
+
   Future<List<StockBatch>> fetchBatches() async {
     final rows = await _database.fetchBatches();
     return rows.map(StockBatch.fromMap).toList();
@@ -85,6 +95,10 @@ class PurchaseRepository {
 
   Future<void> deleteBatchesByItem(int itemId) async {
     await _database.deleteBatchesByItem(itemId);
+  }
+
+  Future<void> deleteBatchesByPurchaseId(int purchaseId) async {
+    await _database.deleteBatchesByPurchaseId(purchaseId);
   }
 
   Future<void> clearAll() async {

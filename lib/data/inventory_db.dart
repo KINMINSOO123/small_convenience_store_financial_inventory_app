@@ -410,49 +410,39 @@ class InventoryDb {
           );
         }
         if (oldVersion < 16) {
-          // Rename purchased_at → purchase_date in purchase_entries
-          await db.execute(
-            'CREATE TABLE ${_tablePurchases}_new('
-            'id INTEGER PRIMARY KEY AUTOINCREMENT,'
-            'purchase_date TEXT NOT NULL,'
-            'memo TEXT,'
-            'status TEXT NOT NULL DEFAULT "ACTIVE",'
-            'cancel_reason TEXT'
-            ')',
-          );
-          await db.execute(
-            'INSERT INTO ${_tablePurchases}_new '
-            '(id, purchase_date, memo, status, cancel_reason) '
-            'SELECT id, purchase_date, memo, status, cancel_reason '
-            'FROM $_tablePurchases',
-          );
-          await db.execute('DROP TABLE $_tablePurchases');
-          await db.execute(
-            'ALTER TABLE ${_tablePurchases}_new RENAME TO $_tablePurchases',
-          );
-
-          // Rename entry_date → sales_date in sales_entries
-          await db.execute(
-            'CREATE TABLE ${_tableSalesEntries}_new('
-            'id INTEGER PRIMARY KEY AUTOINCREMENT,'
-            'sales_date TEXT NOT NULL,'
-            'memo TEXT,'
-            'amount REAL NOT NULL DEFAULT 0'
-            ')',
-          );
-          await db.execute(
-            'INSERT INTO ${_tableSalesEntries}_new '
-            '(id, sales_date, memo, amount) '
-            'SELECT id, sales_date, memo, amount '
-            'FROM $_tableSalesEntries',
-          );
-          await db.execute('DROP TABLE $_tableSalesEntries');
-          await db.execute(
-            'ALTER TABLE ${_tableSalesEntries}_new RENAME TO $_tableSalesEntries',
-          );
+          // v16 was a duplicate rename — now handled by v15/v14.
+          // Kept as no-op to avoid renumbering migrations.
         }
         if (oldVersion < 17) {
-          // Add UNIQUE constraint on purchase_date
+          // Detect actual column names (may be pre-rename if v15/v14 did not run)
+          final purchaseCols = await db.rawQuery(
+            'PRAGMA table_info($_tablePurchases)',
+          );
+          final purchaseDateCol = purchaseCols.any(
+            (c) => c['name'] == 'purchase_date',
+          )
+              ? 'purchase_date'
+              : 'purchased_at';
+
+          final salesCols = await db.rawQuery(
+            'PRAGMA table_info($_tableSalesEntries)',
+          );
+          final salesDateCol = salesCols.any((c) => c['name'] == 'sales_date')
+              ? 'sales_date'
+              : 'entry_date';
+
+          // --- Purchase entries: deduplicate by date ---
+          final oldPurchases = await db.rawQuery(
+            'SELECT id, $purchaseDateCol AS date_col, memo, status, '
+            'cancel_reason '
+            'FROM $_tablePurchases ORDER BY id',
+          );
+          final purchaseGroups = <String, List<Map<String, Object?>>>{};
+          for (final row in oldPurchases) {
+            final date = row['date_col'] as String;
+            purchaseGroups.putIfAbsent(date, () => []).add(row);
+          }
+
           await db.execute(
             'CREATE TABLE ${_tablePurchases}_new('
             'id INTEGER PRIMARY KEY AUTOINCREMENT,'
@@ -462,18 +452,48 @@ class InventoryDb {
             'cancel_reason TEXT'
             ')',
           );
-          await db.execute(
-            'INSERT INTO ${_tablePurchases}_new '
-            '(id, purchase_date, memo, status, cancel_reason) '
-            'SELECT id, purchase_date, memo, status, cancel_reason '
-            'FROM $_tablePurchases',
-          );
+          for (final group in purchaseGroups.values) {
+            final first = group.first;
+            final survivingId = first['id'] as int;
+            for (int i = 1; i < group.length; i++) {
+              final dupId = group[i]['id'] as int;
+              await db.update(
+                _tablePurchaseItems,
+                {'purchase_id': survivingId},
+                where: 'purchase_id = ?',
+                whereArgs: [dupId],
+              );
+              await db.update(
+                _tableBatches,
+                {'purchase_id': survivingId},
+                where: 'purchase_id = ?',
+                whereArgs: [dupId],
+              );
+            }
+            await db.insert('${_tablePurchases}_new', {
+              'id': survivingId,
+              'purchase_date': first['date_col'],
+              'memo': first['memo'],
+              'status': first['status'] ?? 'ACTIVE',
+              'cancel_reason': first['cancel_reason'],
+            });
+          }
           await db.execute('DROP TABLE $_tablePurchases');
           await db.execute(
             'ALTER TABLE ${_tablePurchases}_new RENAME TO $_tablePurchases',
           );
 
-          // Add UNIQUE constraint on sales_date
+          // --- Sales entries: deduplicate by date ---
+          final oldSales = await db.rawQuery(
+            'SELECT id, $salesDateCol AS date_col, memo, amount '
+            'FROM $_tableSalesEntries ORDER BY id',
+          );
+          final salesGroups = <String, List<Map<String, Object?>>>{};
+          for (final row in oldSales) {
+            final date = row['date_col'] as String;
+            salesGroups.putIfAbsent(date, () => []).add(row);
+          }
+
           await db.execute(
             'CREATE TABLE ${_tableSalesEntries}_new('
             'id INTEGER PRIMARY KEY AUTOINCREMENT,'
@@ -482,12 +502,34 @@ class InventoryDb {
             'amount REAL NOT NULL DEFAULT 0'
             ')',
           );
-          await db.execute(
-            'INSERT INTO ${_tableSalesEntries}_new '
-            '(id, sales_date, memo, amount) '
-            'SELECT id, sales_date, memo, amount '
-            'FROM $_tableSalesEntries',
-          );
+          for (final group in salesGroups.values) {
+            final first = group.first;
+            final survivingId = first['id'] as int;
+            double totalAmount = (first['amount'] as num).toDouble();
+            String? memo = first['memo'] as String?;
+            for (int i = 1; i < group.length; i++) {
+              final dupId = group[i]['id'] as int;
+              totalAmount += (group[i]['amount'] as num).toDouble();
+              if (memo == null || memo.isEmpty) {
+                final m = group[i]['memo'] as String?;
+                if (m != null && m.isNotEmpty) {
+                  memo = m;
+                }
+              }
+              await db.update(
+                _tableSalesItems,
+                {'sales_id': survivingId},
+                where: 'sales_id = ?',
+                whereArgs: [dupId],
+              );
+            }
+            await db.insert('${_tableSalesEntries}_new', {
+              'id': survivingId,
+              'sales_date': first['date_col'],
+              'memo': memo,
+              'amount': totalAmount,
+            });
+          }
           await db.execute('DROP TABLE $_tableSalesEntries');
           await db.execute(
             'ALTER TABLE ${_tableSalesEntries}_new RENAME TO $_tableSalesEntries',
@@ -673,6 +715,19 @@ class InventoryDb {
       where: 'item_id = ?',
       whereArgs: [itemId],
     );
+  }
+
+  Future<void> deletePurchaseEntryItem(int id) async {
+    final db = await database;
+    await db.delete(_tablePurchaseItems, where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<void> updatePurchaseEntryItem(
+    Map<String, Object?> values,
+    int id,
+  ) async {
+    final db = await database;
+    await db.update(_tablePurchaseItems, values, where: 'id = ?', whereArgs: [id]);
   }
 
   Future<List<Map<String, Object?>>> fetchBatches() async {
@@ -868,6 +923,19 @@ class InventoryDb {
       where: 'item_id = ?',
       whereArgs: [itemId],
     );
+  }
+
+  Future<void> deleteSalesEntryItem(int id) async {
+    final db = await database;
+    await db.delete(_tableSalesItems, where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<void> updateSalesEntryItem(
+    Map<String, Object?> values,
+    int id,
+  ) async {
+    final db = await database;
+    await db.update(_tableSalesItems, values, where: 'id = ?', whereArgs: [id]);
   }
 
   Future<List<Map<String, Object?>>> fetchJournalLines() async {

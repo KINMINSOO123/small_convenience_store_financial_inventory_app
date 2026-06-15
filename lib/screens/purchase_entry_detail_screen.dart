@@ -208,6 +208,189 @@ class _PurchaseEntryDetailScreenState
         result.isEmpty ? null : result);
   }
 
+  Future<void> _editLineItem(int lineItemId, int currentItemId,
+      int currentQuantity, double currentUnitCost, DateTime? currentExpiry) async {
+    final items = _inventoryController.allItems;
+    if (items.isEmpty) return;
+
+    int selectedItemId = currentItemId;
+    final quantityController =
+        TextEditingController(text: currentQuantity.toString());
+    final costController =
+        TextEditingController(text: currentUnitCost.toStringAsFixed(2));
+    DateTime? expiryDate = currentExpiry;
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text('Edit item'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    DropdownButtonFormField<int>(
+                      value: selectedItemId,
+                      decoration: const InputDecoration(labelText: 'Item'),
+                      items: items
+                          .map(
+                            (item) => DropdownMenuItem<int>(
+                              value: item.id,
+                              child: Text(item.name),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (value) {
+                        if (value == null) return;
+                        setDialogState(() {
+                          selectedItemId = value;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: quantityController,
+                      decoration: const InputDecoration(
+                        labelText: 'Quantity purchased',
+                      ),
+                      keyboardType: TextInputType.number,
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: costController,
+                      decoration:
+                          const InputDecoration(labelText: 'Unit cost'),
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            expiryDate == null
+                                ? 'No expiry date'
+                                : 'Expiry: ${_formatDate(expiryDate!)}',
+                          ),
+                        ),
+                        if (expiryDate != null)
+                          TextButton(
+                            onPressed: () {
+                              setDialogState(() {
+                                expiryDate = null;
+                              });
+                            },
+                            child: const Text('Clear'),
+                          ),
+                        TextButton(
+                          onPressed: () async {
+                            final picked = await showDatePicker(
+                              context: context,
+                              initialDate: expiryDate ?? DateTime.now(),
+                              firstDate: DateTime(2000),
+                              lastDate: DateTime(2100),
+                            );
+                            if (picked == null) return;
+                            setDialogState(() {
+                              expiryDate = picked;
+                            });
+                          },
+                          child: const Text('Pick date'),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(false),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.of(context).pop(true),
+                  child: const Text('Save'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (result != true) return;
+
+    final quantity = int.tryParse(quantityController.text.trim());
+    final unitCost = double.tryParse(costController.text.trim());
+    if (quantity == null || unitCost == null || quantity <= 0) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter a valid quantity and cost.'),
+        ),
+      );
+      return;
+    }
+
+    try {
+      await _controller.updateLineItemInPurchase(
+        purchaseId: widget.purchase.id,
+        lineItemId: lineItemId,
+        itemId: selectedItemId,
+        quantity: quantity,
+        unitCost: unitCost,
+        expiryDate: expiryDate,
+      );
+    } on StateError catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.message)),
+      );
+    }
+  }
+
+  Future<void> _deleteLineItem(int lineItemId) async {
+    final confirmed = await _confirmDeleteLineItem(context);
+    if (confirmed != true) return;
+    try {
+      await _controller.deleteLineItemFromPurchase(
+        widget.purchase.id,
+        lineItemId,
+      );
+    } on StateError catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.message)),
+      );
+    }
+  }
+
+  Future<bool?> _confirmDeleteLineItem(BuildContext context) async {
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete item'),
+        content: const Text(
+          'Remove this item from the purchase? '
+          'Its stock effect will be reversed.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -329,13 +512,49 @@ class _PurchaseEntryDetailScreenState
                       subtitle: Text(
                         '${item.quantity} units × \$${item.unitCost.toStringAsFixed(2)}',
                       ),
-                      trailing: Text(
-                        '\$${item.subtotal.toStringAsFixed(2)}',
-                        style: theme.textTheme.titleMedium,
-                      ),
-                    ),
-                  );
-                }),
+                      trailing: purchase.isCancelled
+                          ? Text(
+                              '\$${item.subtotal.toStringAsFixed(2)}',
+                              style: theme.textTheme.titleMedium,
+                            )
+                          : Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  '\$${item.subtotal.toStringAsFixed(2)}',
+                                  style: theme.textTheme.titleMedium,
+                                ),
+                                const SizedBox(width: 4),
+                                PopupMenuButton<String>(
+                                  onSelected: (value) {
+                                    if (value == 'edit') {
+                                      _editLineItem(
+                                        item.id,
+                                        item.itemId,
+                                        item.quantity,
+                                        item.unitCost,
+                                        item.expiryDate,
+                                      );
+                                    } else if (value == 'delete') {
+                                      _deleteLineItem(item.id);
+                                    }
+                                  },
+                                  itemBuilder: (context) => const [
+                                    PopupMenuItem(
+                                      value: 'edit',
+                                      child: Text('Edit'),
+                                    ),
+                                    PopupMenuItem(
+                                      value: 'delete',
+                                      child: Text('Delete'),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                    }),
               const SizedBox(height: 24),
               if (!purchase.isCancelled)
                 Row(

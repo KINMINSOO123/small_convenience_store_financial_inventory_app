@@ -187,6 +187,169 @@ class _SalesEntryDetailScreenState extends State<SalesEntryDetailScreen> {
     await _controller.updateSalesEntryMemo(widget.sale.id, result);
   }
 
+  Future<void> _editLineItem(int lineItemId, int currentItemId,
+      int currentQuantity) async {
+    final items = _inventoryController.allItems;
+    if (items.isEmpty) return;
+
+    int selectedItemId = currentItemId;
+    final quantityController =
+        TextEditingController(text: currentQuantity.toString());
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final selectedItem =
+                _inventoryController.getItemById(selectedItemId);
+            return AlertDialog(
+              title: const Text('Edit item'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    DropdownButtonFormField<int>(
+                      value: selectedItemId,
+                      decoration: const InputDecoration(labelText: 'Item'),
+                      items: items
+                          .map(
+                            (item) => DropdownMenuItem<int>(
+                              value: item.id,
+                              child: Text(item.name),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (value) {
+                        if (value == null) return;
+                        setDialogState(() {
+                          selectedItemId = value;
+                        });
+                      },
+                    ),
+                    if (selectedItem != null) ...[
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Text(
+                            'Available: ${selectedItem.quantity}',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                          const SizedBox(width: 12),
+                          Text(
+                            'Price: \$${selectedItem.sellingPrice.toStringAsFixed(2)}',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ],
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: quantityController,
+                      decoration: const InputDecoration(
+                        labelText: 'Quantity sold',
+                      ),
+                      keyboardType: TextInputType.number,
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(false),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.of(context).pop(true),
+                  child: const Text('Save'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (result != true) return;
+
+    final quantity = int.tryParse(quantityController.text.trim());
+    if (quantity == null || quantity <= 0) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter a valid quantity.'),
+        ),
+      );
+      return;
+    }
+
+    final selectedItem = _inventoryController.getItemById(selectedItemId);
+    if (selectedItem == null) return;
+    final available = selectedItem.quantity;
+    if (quantity > available) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Only $available units available.'),
+        ),
+      );
+      return;
+    }
+
+    try {
+      await _controller.updateLineItemInSale(
+        saleId: widget.sale.id,
+        lineItemId: lineItemId,
+        itemId: selectedItemId,
+        quantity: quantity,
+      );
+    } on StateError catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.message)),
+      );
+    }
+  }
+
+  Future<void> _deleteLineItem(int lineItemId) async {
+    final confirmed = await _confirmDeleteLineItem(context);
+    if (confirmed != true) return;
+    try {
+      await _controller.deleteLineItemFromSale(
+        widget.sale.id,
+        lineItemId,
+      );
+    } on StateError catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.message)),
+      );
+    }
+  }
+
+  Future<bool?> _confirmDeleteLineItem(BuildContext context) async {
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete item'),
+        content: const Text(
+          'Remove this item from the sale? '
+          'Its stock effect will be reversed.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -278,17 +441,45 @@ class _SalesEntryDetailScreenState extends State<SalesEntryDetailScreen> {
                       subtitle: Text(
                         '${item.quantity} units × \$${item.unitPrice.toStringAsFixed(2)}',
                       ),
-                      trailing: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        crossAxisAlignment: CrossAxisAlignment.end,
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
-                          Text(
-                            '\$${item.subtotal.toStringAsFixed(2)}',
-                            style: theme.textTheme.titleMedium,
+                          Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Text(
+                                '\$${item.subtotal.toStringAsFixed(2)}',
+                                style: theme.textTheme.titleMedium,
+                              ),
+                              Text(
+                                'COGS: \$${item.costOfGoodsSold.toStringAsFixed(2)}',
+                                style: theme.textTheme.bodySmall,
+                              ),
+                            ],
                           ),
-                          Text(
-                            'COGS: \$${item.costOfGoodsSold.toStringAsFixed(2)}',
-                            style: theme.textTheme.bodySmall,
+                          PopupMenuButton<String>(
+                            onSelected: (value) {
+                              if (value == 'edit') {
+                                _editLineItem(
+                                  item.id,
+                                  item.itemId,
+                                  item.quantity,
+                                );
+                              } else if (value == 'delete') {
+                                _deleteLineItem(item.id);
+                              }
+                            },
+                            itemBuilder: (context) => const [
+                              PopupMenuItem(
+                                value: 'edit',
+                                child: Text('Edit'),
+                              ),
+                              PopupMenuItem(
+                                value: 'delete',
+                                child: Text('Delete'),
+                              ),
+                            ],
                           ),
                         ],
                       ),

@@ -51,6 +51,28 @@ class SalesController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> deleteLineItemFromSale(int saleId, int lineItemId) async {
+    await _service.deleteLineItemFromSale(saleId, lineItemId);
+    onInventoryChanged?.call();
+    notifyListeners();
+  }
+
+  Future<void> updateLineItemInSale({
+    required int saleId,
+    required int lineItemId,
+    required int itemId,
+    required int quantity,
+  }) async {
+    await _service.updateLineItemInSale(
+      saleId: saleId,
+      lineItemId: lineItemId,
+      itemId: itemId,
+      quantity: quantity,
+    );
+    onInventoryChanged?.call();
+    notifyListeners();
+  }
+
   Future<void> loadData() async {
     _isLoading = true;
     notifyListeners();

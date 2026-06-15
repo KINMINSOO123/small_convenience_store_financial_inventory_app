@@ -292,6 +292,86 @@ class SalesService {
     _entries[index] = updated;
   }
 
+  Future<void> deleteLineItemFromSale(int saleId, int lineItemId) async {
+    final lineItemIndex = _entryItems.indexWhere((i) => i.id == lineItemId);
+    if (lineItemIndex == -1) return;
+    final lineItem = _entryItems[lineItemIndex];
+
+    await _purchaseService.restockFromSale(
+      itemId: lineItem.itemId,
+      quantity: lineItem.quantity,
+    );
+
+    await _repository.deleteSalesEntryItem(lineItemId);
+    _entryItems.removeAt(lineItemIndex);
+
+    final entryIndex = _entries.indexWhere((e) => e.id == saleId);
+    if (entryIndex != -1) {
+      final entry = _entries[entryIndex];
+      final newAmount = entry.amount - lineItem.subtotal;
+      final updated = SalesEntry(
+        id: entry.id,
+        salesDate: entry.salesDate,
+        memo: entry.memo,
+        amount: newAmount,
+      );
+      await _repository.updateSalesEntry(updated);
+      _entries[entryIndex] = updated;
+    }
+    _sortEntries();
+  }
+
+  Future<void> updateLineItemInSale({
+    required int saleId,
+    required int lineItemId,
+    required int itemId,
+    required int quantity,
+  }) async {
+    if (quantity <= 0) return;
+    final oldItemIndex = _entryItems.indexWhere((i) => i.id == lineItemId);
+    if (oldItemIndex == -1) return;
+    final oldItem = _entryItems[oldItemIndex];
+
+    await _purchaseService.restockFromSale(
+      itemId: oldItem.itemId,
+      quantity: oldItem.quantity,
+    );
+
+    final item = _requireItem(itemId);
+    final cogs = _computeCogs(itemId, quantity);
+    await _purchaseService.consumeStock(
+      itemId: itemId,
+      quantity: quantity,
+    );
+
+    final updatedLineItem = SalesEntryItem(
+      id: lineItemId,
+      salesId: saleId,
+      itemId: itemId,
+      quantity: quantity,
+      unitPrice: item.sellingPrice,
+      costOfGoodsSold: cogs,
+    );
+    await _repository.updateSalesEntryItem(updatedLineItem);
+    _entryItems[oldItemIndex] = updatedLineItem;
+
+    final entryIndex = _entries.indexWhere((e) => e.id == saleId);
+    if (entryIndex != -1) {
+      final entry = _entries[entryIndex];
+      final newAmount =
+          entry.amount - oldItem.subtotal + updatedLineItem.subtotal;
+      final updatedEntry = SalesEntry(
+        id: entry.id,
+        salesDate: entry.salesDate,
+        memo: entry.memo,
+        amount: newAmount,
+      );
+      await _repository.updateSalesEntry(updatedEntry);
+      _entries[entryIndex] = updatedEntry;
+    }
+    _sortEntries();
+  }
+
   double _computeCogs(int itemId, int quantity) {
     var remaining = quantity;
     double total = 0;

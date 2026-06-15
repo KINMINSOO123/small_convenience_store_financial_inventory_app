@@ -52,4 +52,14 @@ class SalesRepository {
   Future<void> deleteSalesEntryItemsByItem(int itemId) async {
     await _database.deleteSalesEntryItemsByItem(itemId);
   }
+
+  Future<void> deleteSalesEntryItem(int id) async {
+    await _database.deleteSalesEntryItem(id);
+  }
+
+  Future<void> updateSalesEntryItem(SalesEntryItem item) async {
+    final map = item.toMap();
+    final id = map.remove('id') as int? ?? item.id;
+    await _database.updateSalesEntryItem(map, id);
+  }
 }
