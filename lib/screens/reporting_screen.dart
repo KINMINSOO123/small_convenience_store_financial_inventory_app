@@ -636,7 +636,12 @@ class _ReportList extends StatelessWidget {
           return ListTile(
             title: Text(line.label),
             subtitle: Text('$quantityLabel: ${line.quantity}'),
-            trailing: Text(line.total.toStringAsFixed(2)),
+            trailing: Text(
+              line.total.toStringAsFixed(2),
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+            ),
           );
         },
       ),

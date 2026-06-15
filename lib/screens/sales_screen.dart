@@ -414,12 +414,25 @@ class _SalesScreenState extends State<SalesScreen> {
                                     .primaryContainer,
                                 child: const Icon(Icons.point_of_sale_outlined),
                               ),
-                              title: Text(
-                                _formatDate(entry.salesDate),
+                              title: Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      _formatDate(entry.salesDate),
+                                    ),
+                                  ),
+                                  Text(
+                                    entryTotal.toStringAsFixed(2),
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleMedium
+                                        ?.copyWith(
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                  ),
+                                ],
                               ),
-                              subtitle: Text(
-                                '\$${entryTotal.toStringAsFixed(2)} · $memo',
-                              ),
+                              subtitle: Text(memo),
                               trailing: const Icon(Icons.chevron_right),
                               onTap: () {
                                 Navigator.of(context).push(

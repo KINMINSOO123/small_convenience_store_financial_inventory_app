@@ -617,7 +617,7 @@ class PurchaseService {
     }
     final now = DateTime.now();
     return nextExpiry.isAfter(now) &&
-        nextExpiry.isBefore(now.add(const Duration(days: 7)));
+        nextExpiry.isBefore(now.add(const Duration(days: 30)));
   }
 
   List<StockBatch> stockRotationForItem(int itemId) {

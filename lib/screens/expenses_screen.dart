@@ -365,8 +365,19 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                                     .primaryContainer,
                                 child: const Icon(Icons.payments_outlined),
                               ),
-                              title: Text(
-                                '$category · ${entry.total.toStringAsFixed(2)}',
+                              title: Row(
+                                children: [
+                                  Expanded(child: Text(category)),
+                                  Text(
+                                    entry.total.toStringAsFixed(2),
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleMedium
+                                        ?.copyWith(
+                                          fontWeight: FontWeight.w600,
+                                        ),
+                                  ),
+                                ],
                               ),
                               subtitle: Text(
                                 '${_formatDate(entry.date)} · $memo',

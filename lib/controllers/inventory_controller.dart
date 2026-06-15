@@ -126,7 +126,7 @@ class InventoryController extends ChangeNotifier {
       return [];
     }
     final now = DateTime.now();
-    final soon = now.add(const Duration(days: 7));
+    final soon = now.add(const Duration(days: 30));
     return _service.items.where((item) {
       final expiry = purchaseController.nextExpiryForItem(item.id);
       if (expiry == null) {

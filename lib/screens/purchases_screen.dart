@@ -573,54 +573,30 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
                                 vertical: 6,
                               ),
                               leading: CircleAvatar(
-                                backgroundColor: Theme.of(
-                                  context,
-                                ).colorScheme.primaryContainer,
+                                backgroundColor: purchase.isCancelled
+                                    ? Theme.of(context).colorScheme.errorContainer
+                                    : Theme.of(context).colorScheme.primaryContainer,
                                 child: const Icon(Icons.receipt_long_outlined),
                               ),
-                              title: Text(
-                                _formatDate(purchase.purchaseDate),
-                              ),
-                              subtitle: Row(
+                              title: Row(
                                 children: [
-                                  Text(
-                                    '\$${total.toStringAsFixed(2)}',
-                                    style:
-                                        Theme.of(context).textTheme.titleMedium,
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 8,
-                                      vertical: 2,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: purchase.isCancelled
-                                          ? Theme.of(context)
-                                              .colorScheme
-                                              .errorContainer
-                                          : Theme.of(context)
-                                              .colorScheme
-                                              .primaryContainer,
-                                      borderRadius: BorderRadius.circular(999),
-                                    ),
+                                  Expanded(
                                     child: Text(
-                                      statusLabel,
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .labelSmall
-                                          ?.copyWith(
-                                            color: purchase.isCancelled
-                                                ? Theme.of(context).colorScheme
-                                                    .onErrorContainer
-                                                : Theme.of(context)
-                                                    .colorScheme
-                                                    .onPrimaryContainer,
-                                          ),
+                                      _formatDate(purchase.purchaseDate),
                                     ),
+                                  ),
+                                  Text(
+                                    total.toStringAsFixed(2),
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .titleMedium
+                                        ?.copyWith(
+                                          fontWeight: FontWeight.w600,
+                                        ),
                                   ),
                                 ],
                               ),
+                              subtitle: Text(statusLabel),
                               trailing: const Icon(Icons.chevron_right),
                               onTap: () {
                                 Navigator.of(context).push(

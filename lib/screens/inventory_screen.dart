@@ -451,20 +451,32 @@ class _InventoryScreenState extends State<InventoryScreen> {
                               horizontal: 16,
                               vertical: 6,
                             ),
-                            title: Text(item.name),
+                            title: Row(
+                              children: [
+                                Expanded(child: Text(item.name)),
+                                Text(
+                                  _controller
+                                      .stockValueForItem(item.id)
+                                      .toStringAsFixed(2),
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .titleMedium
+                                      ?.copyWith(fontWeight: FontWeight.w600),
+                                ),
+                              ],
+                            ),
                             subtitle: Padding(
                               padding: const EdgeInsets.only(top: 4),
-                              child: Wrap(
-                                spacing: 8,
-                                runSpacing: 6,
+                              child: Row(
                                 children: [
-                                  _Pill(label: item.category),
-                                  _Pill(label: '${item.quantity} units'),
-                                  _Pill(
-                                    label: 'Value ${_controller.stockValueForItem(item.id).toStringAsFixed(2)}',
+                                  Expanded(
+                                    child: Text(
+                                      '${item.quantity} units · Low at ${item.lowStockThreshold}',
+                                    ),
                                   ),
-                                  _Pill(
-                                    label: 'Low at ${item.lowStockThreshold}',
+                                  Text(
+                                    '${item.sellingPrice.toStringAsFixed(2)}/unit',
+                                    style: Theme.of(context).textTheme.bodySmall,
                                   ),
                                 ],
                               ),
@@ -477,39 +489,26 @@ class _InventoryScreenState extends State<InventoryScreen> {
                                     : item.name[0].toUpperCase(),
                               ),
                             ),
-                            trailing: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(item.sellingPrice.toStringAsFixed(2)),
-                                IconButton(
-                                  icon: const Icon(Icons.edit_outlined),
-                                  onPressed: () => _showItemDialog(
-                                    category: item.category,
-                                    existing: item,
-                                  ),
-                                  tooltip: 'Edit',
-                                ),
-                                IconButton(
-                                  icon: const Icon(Icons.delete_outline),
-                                  onPressed: () async {
-                                    final confirmed = await _confirmDeleteItem(
-                                      item.name,
-                                    );
-                                    if (confirmed != true) {
-                                      return;
-                                    }
-                                    await _controller.removeItem(item.id);
-                                  },
-                                  tooltip: 'Remove',
-                                ),
-                              ],
-                            ),
                             onTap: () {
                               Navigator.of(context).push(
                                 MaterialPageRoute(
                                   builder: (_) => InventoryItemDetailScreen(
                                     item: item,
                                     controller: _controller,
+                                    onEdit: () => _showItemDialog(
+                                      category: item.category,
+                                      existing: item,
+                                    ),
+                                    onDelete: () async {
+                                      final confirmed =
+                                          await _confirmDeleteItem(item.name);
+                                      if (confirmed == true) {
+                                        await _controller.removeItem(item.id);
+                                        if (context.mounted) {
+                                          Navigator.of(context).pop();
+                                        }
+                                      }
+                                    },
                                   ),
                                 ),
                               );
@@ -541,6 +540,12 @@ class _CategoryList extends StatelessWidget {
   final ValueChanged<String> onRename;
   final ValueChanged<String> onDelete;
 
+  bool _categoryHasWarning(InventoryController ctrl, String category) {
+    return ctrl.itemsForCategory(category).any(
+      (item) => item.isLowStock || ctrl.isItemExpiringSoon(item.id),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (categories.isEmpty) {
@@ -564,21 +569,25 @@ class _CategoryList extends StatelessWidget {
             vertical: 6,
           ),
           leading: CircleAvatar(
-            backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+            backgroundColor: _categoryHasWarning(controller, category)
+                ? Theme.of(context).colorScheme.errorContainer
+                : Theme.of(context).colorScheme.primaryContainer,
             child: Text(category.isEmpty ? '?' : category[0].toUpperCase()),
           ),
-          title: Text(category),
+          title: Row(
+            children: [
+              Expanded(child: Text(category)),
+              Text(
+                stockValue.toStringAsFixed(2),
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
           subtitle: Padding(
             padding: const EdgeInsets.only(top: 4),
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 6,
-              children: [
-                _Pill(label: '$itemCount items'),
-                _Pill(label: '$quantity units'),
-                _Pill(label: 'Value ${stockValue.toStringAsFixed(2)}'),
-              ],
-            ),
+            child: Text('$itemCount items · $quantity units'),
           ),
           trailing: PopupMenuButton<String>(
             onSelected: (value) {
@@ -647,20 +656,3 @@ class _InfoCard extends StatelessWidget {
   }
 }
 
-class _Pill extends StatelessWidget {
-  const _Pill({required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surface,
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(label, style: Theme.of(context).textTheme.labelSmall),
-    );
-  }
-}
