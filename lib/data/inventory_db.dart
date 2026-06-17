@@ -5,7 +5,7 @@ import '../models/inventory_item.dart';
 
 class InventoryDb {
   static const _dbName = 'inventory.db';
-  static const _dbVersion = 19;
+  static const _dbVersion = 21;
   static const _tableItems = 'inventory_items';
   static const _tableCategories = 'inventory_categories';
   static const _tableSettings = 'app_settings';
@@ -67,7 +67,7 @@ class InventoryDb {
         await db.execute(
           'CREATE TABLE $_tablePurchases('
           'id INTEGER PRIMARY KEY AUTOINCREMENT,'
-          'purchase_date TEXT NOT NULL UNIQUE,'
+          'purchase_date TEXT NOT NULL,'
           'memo TEXT,'
           'status TEXT NOT NULL DEFAULT "ACTIVE",'
           'cancel_reason TEXT'
@@ -141,9 +141,10 @@ class InventoryDb {
         await db.execute(
           'CREATE TABLE $_tableSalesEntries('
           'id INTEGER PRIMARY KEY AUTOINCREMENT,'
-          'sales_date TEXT NOT NULL UNIQUE,'
+          'sales_date TEXT NOT NULL,'
           'memo TEXT,'
-          'amount REAL NOT NULL DEFAULT 0'
+          'amount REAL NOT NULL DEFAULT 0,'
+          'status TEXT NOT NULL DEFAULT "ACTIVE"'
           ')',
         );
         await db.execute(
@@ -613,6 +614,57 @@ class InventoryDb {
             'reference_type TEXT NOT NULL,'
             'reference_id INTEGER NOT NULL'
             ')',
+          );
+        }
+        if (oldVersion < 20) {
+          try {
+            await db.execute(
+              'ALTER TABLE $_tableSalesEntries '
+              'ADD COLUMN status TEXT NOT NULL DEFAULT "ACTIVE"',
+            );
+          } catch (_) {
+            // Column may already exist
+          }
+        }
+        if (oldVersion < 21) {
+          // Remove UNIQUE constraints on purchase_date and sales_date.
+          await db.execute(
+            'CREATE TABLE ${_tablePurchases}_new('
+            'id INTEGER PRIMARY KEY AUTOINCREMENT,'
+            'purchase_date TEXT NOT NULL,'
+            'memo TEXT,'
+            'status TEXT NOT NULL DEFAULT "ACTIVE",'
+            'cancel_reason TEXT'
+            ')',
+          );
+          await db.execute(
+            'INSERT INTO ${_tablePurchases}_new '
+            '(id, purchase_date, memo, status, cancel_reason) '
+            'SELECT id, purchase_date, memo, status, cancel_reason '
+            'FROM $_tablePurchases',
+          );
+          await db.execute('DROP TABLE $_tablePurchases');
+          await db.execute(
+            'ALTER TABLE ${_tablePurchases}_new RENAME TO $_tablePurchases',
+          );
+          await db.execute(
+            'CREATE TABLE ${_tableSalesEntries}_new('
+            'id INTEGER PRIMARY KEY AUTOINCREMENT,'
+            'sales_date TEXT NOT NULL,'
+            'memo TEXT,'
+            'amount REAL NOT NULL DEFAULT 0,'
+            'status TEXT NOT NULL DEFAULT "ACTIVE"'
+            ')',
+          );
+          await db.execute(
+            'INSERT INTO ${_tableSalesEntries}_new '
+            '(id, sales_date, memo, amount, status) '
+            'SELECT id, sales_date, memo, amount, status '
+            'FROM $_tableSalesEntries',
+          );
+          await db.execute('DROP TABLE $_tableSalesEntries');
+          await db.execute(
+            'ALTER TABLE ${_tableSalesEntries}_new RENAME TO $_tableSalesEntries',
           );
         }
       },

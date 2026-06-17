@@ -13,6 +13,7 @@ class PurchaseEntry {
   final String status;
   final String? cancelReason;
 
+  bool get isDraft => status.toUpperCase() == 'DRAFT';
   bool get isCancelled => status.toUpperCase() == 'CANCELLED';
 
   Map<String, Object?> toMap() {

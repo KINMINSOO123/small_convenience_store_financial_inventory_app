@@ -4,12 +4,17 @@ class SalesEntry {
     required this.salesDate,
     required this.memo,
     required this.amount,
+    this.status = 'ACTIVE',
   });
 
   final int id;
   final DateTime salesDate;
   final String memo;
   final double amount;
+  final String status;
+
+  bool get isDraft => status.toUpperCase() == 'DRAFT';
+  bool get isVoid => status.toUpperCase() == 'VOID';
 
   Map<String, Object?> toMap() {
     return {
@@ -17,6 +22,7 @@ class SalesEntry {
       'sales_date': salesDate.toIso8601String(),
       'memo': memo,
       'amount': amount,
+      'status': status,
     };
   }
 
@@ -26,6 +32,7 @@ class SalesEntry {
       salesDate: DateTime.parse((map['sales_date'] as String?) ?? ''),
       memo: (map['memo'] as String?) ?? '',
       amount: (map['amount'] as num?)?.toDouble() ?? 0,
+      status: (map['status'] as String?) ?? 'ACTIVE',
     );
   }
 }

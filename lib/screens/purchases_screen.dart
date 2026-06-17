@@ -26,6 +26,7 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
   InventoryController get _inventoryController => widget.inventoryController;
   DateTime? _startDate;
   DateTime? _endDate;
+  bool _todayFilter = false;
 
   Future<void> _showAddDialog() async {
     final quantityController = TextEditingController();
@@ -397,12 +398,15 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
   }
 
   bool _isWithinRange(DateTime date) {
+    final normalized = DateTime(date.year, date.month, date.day);
+    final today = DateTime.now();
+    final todayNormalized = DateTime(today.year, today.month, today.day);
+    if (_todayFilter && normalized != todayNormalized) return false;
     final start = _startDate;
     final end = _endDate;
     if (start == null && end == null) {
       return true;
     }
-    final normalized = DateTime(date.year, date.month, date.day);
     final startNormalized = start == null
         ? null
         : DateTime(start.year, start.month, start.day);
@@ -438,10 +442,17 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
     });
   }
 
+  void _toggleTodayFilter() {
+    setState(() {
+      _todayFilter = !_todayFilter;
+    });
+  }
+
   void _clearDateFilter() {
     setState(() {
       _startDate = null;
       _endDate = null;
+      _todayFilter = false;
     });
   }
 
@@ -498,6 +509,16 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
                       ),
                       child: Row(
                         children: [
+                          _todayFilter
+                              ? FilledButton(
+                                  onPressed: _toggleTodayFilter,
+                                  child: const Text('Today'),
+                                )
+                              : OutlinedButton(
+                                  onPressed: _toggleTodayFilter,
+                                  child: const Text('Today'),
+                                ),
+                          const SizedBox(width: 8),
                           Expanded(
                             child: OutlinedButton(
                               onPressed: _pickDateRange,
@@ -531,6 +552,10 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
                                 DropdownMenuItem(
                                   value: PurchaseFilter.all,
                                   child: Text('All'),
+                                ),
+                                DropdownMenuItem(
+                                  value: PurchaseFilter.draft,
+                                  child: Text('Draft'),
                                 ),
                                 DropdownMenuItem(
                                   value: PurchaseFilter.active,
@@ -567,18 +592,22 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
                             final purchase = purchases[index];
                             final total =
                                 _controller.totalForPurchase(purchase.id);
-                            final statusLabel = purchase.isCancelled
-                                ? 'Cancelled'
-                                : 'Active';
+                            final statusLabel = purchase.isDraft
+                                ? 'Draft'
+                                : purchase.isCancelled
+                                    ? 'Cancelled'
+                                    : 'Completed';
                             return ListTile(
                               contentPadding: const EdgeInsets.symmetric(
                                 horizontal: 16,
                                 vertical: 6,
                               ),
                               leading: CircleAvatar(
-                                backgroundColor: purchase.isCancelled
-                                    ? Theme.of(context).colorScheme.errorContainer
-                                    : Theme.of(context).colorScheme.primaryContainer,
+                                backgroundColor: purchase.isDraft
+                                    ? Theme.of(context).colorScheme.tertiaryContainer
+                                    : purchase.isCancelled
+                                        ? Theme.of(context).colorScheme.errorContainer
+                                        : Theme.of(context).colorScheme.primaryContainer,
                                 child: const Icon(Icons.receipt_long_outlined),
                               ),
                               title: Row(

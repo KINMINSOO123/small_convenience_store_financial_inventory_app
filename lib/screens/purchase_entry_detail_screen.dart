@@ -380,8 +380,7 @@ class _PurchaseEntryDetailScreenState
       builder: (context) => AlertDialog(
         title: const Text('Delete item'),
         content: const Text(
-          'Remove this item from the purchase? '
-          'Its stock effect will be reversed.',
+          'Remove this item from the purchase?',
         ),
         actions: [
           TextButton(
@@ -504,7 +503,7 @@ class _PurchaseEntryDetailScreenState
                           _inventoryController.getItemById(item.itemId);
                       final name = invItem?.name ?? 'Item #${item.itemId}';
                       final available = _controller
-                          .availableQuantityForItem(item.itemId);
+                          .availableQuantityForPurchaseItem(item.id);
                       final ctrl = quantityControllers[item.id]!;
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 8),
@@ -513,7 +512,7 @@ class _PurchaseEntryDetailScreenState
                           children: [
                             Text(
                               '$name  (Purchased: ${item.quantity}, '
-                              'Available: $available)',
+                              'In stock: $available)',
                               style: Theme.of(context).textTheme.bodyMedium,
                             ),
                             const SizedBox(height: 4),
@@ -557,7 +556,7 @@ class _PurchaseEntryDetailScreenState
       final ctrl = quantityControllers[item.id]!;
       final qty = int.tryParse(ctrl.text.trim());
       if (qty == null || qty <= 0) continue;
-      if (qty > _controller.availableQuantityForItem(item.itemId)) {
+      if (qty > _controller.availableQuantityForPurchaseItem(item.id)) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -709,7 +708,7 @@ class _PurchaseEntryDetailScreenState
       appBar: AppBar(
         title: Text('Purchase ${_formatDate(widget.purchase.purchaseDate)}'),
         actions: [
-          if (!widget.purchase.isCancelled)
+          if (widget.purchase.isDraft)
             IconButton(
               onPressed: _editMemo,
               icon: const Icon(Icons.edit_outlined),
@@ -717,13 +716,13 @@ class _PurchaseEntryDetailScreenState
             ),
         ],
       ),
-      floatingActionButton: widget.purchase.isCancelled
-          ? null
-          : FloatingActionButton.extended(
+      floatingActionButton: widget.purchase.isDraft
+          ? FloatingActionButton.extended(
               onPressed: _addItem,
               icon: const Icon(Icons.add),
               label: const Text('Add item'),
-            ),
+            )
+          : null,
       body: AnimatedBuilder(
         animation: Listenable.merge([_controller, _returnController]),
         builder: (context, _) {
@@ -756,17 +755,25 @@ class _PurchaseEntryDetailScreenState
                               vertical: 6,
                             ),
                             decoration: BoxDecoration(
-                              color: purchase.isCancelled
-                                  ? theme.colorScheme.errorContainer
-                                  : theme.colorScheme.primaryContainer,
+                              color: purchase.isDraft
+                                  ? theme.colorScheme.tertiaryContainer
+                                  : purchase.isCancelled
+                                      ? theme.colorScheme.errorContainer
+                                      : theme.colorScheme.primaryContainer,
                               borderRadius: BorderRadius.circular(999),
                             ),
                             child: Text(
-                              purchase.isCancelled ? 'Cancelled' : 'Active',
+                              purchase.isDraft
+                                  ? 'Draft'
+                                  : purchase.isCancelled
+                                      ? 'Cancelled'
+                                      : 'Completed',
                               style: theme.textTheme.labelSmall?.copyWith(
-                                color: purchase.isCancelled
-                                    ? theme.colorScheme.onErrorContainer
-                                    : theme.colorScheme.onPrimaryContainer,
+                                color: purchase.isDraft
+                                    ? theme.colorScheme.onTertiaryContainer
+                                    : purchase.isCancelled
+                                        ? theme.colorScheme.onErrorContainer
+                                        : theme.colorScheme.onPrimaryContainer,
                               ),
                             ),
                           ),
@@ -822,53 +829,78 @@ class _PurchaseEntryDetailScreenState
                       subtitle: Text(
                         '${item.quantity} units × \$${item.unitCost.toStringAsFixed(2)}',
                       ),
-                      trailing: purchase.isCancelled
-                          ? Text(
-                              '\$${item.subtotal.toStringAsFixed(2)}',
-                              style: theme.textTheme.titleMedium,
-                            )
-                          : Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  '\$${item.subtotal.toStringAsFixed(2)}',
-                                  style: theme.textTheme.titleMedium,
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            '\$${item.subtotal.toStringAsFixed(2)}',
+                            style: theme.textTheme.titleMedium,
+                          ),
+                          if (purchase.isDraft) ...[
+                            const SizedBox(width: 4),
+                            PopupMenuButton<String>(
+                              onSelected: (value) {
+                                if (value == 'edit') {
+                                  _editLineItem(
+                                    item.id,
+                                    item.itemId,
+                                    item.quantity,
+                                    item.unitCost,
+                                    item.expiryDate,
+                                  );
+                                } else if (value == 'delete') {
+                                  _deleteLineItem(item.id);
+                                }
+                              },
+                              itemBuilder: (context) => const [
+                                PopupMenuItem(
+                                  value: 'edit',
+                                  child: Text('Edit'),
                                 ),
-                                const SizedBox(width: 4),
-                                PopupMenuButton<String>(
-                                  onSelected: (value) {
-                                    if (value == 'edit') {
-                                      _editLineItem(
-                                        item.id,
-                                        item.itemId,
-                                        item.quantity,
-                                        item.unitCost,
-                                        item.expiryDate,
-                                      );
-                                    } else if (value == 'delete') {
-                                      _deleteLineItem(item.id);
-                                    }
-                                  },
-                                  itemBuilder: (context) => const [
-                                    PopupMenuItem(
-                                      value: 'edit',
-                                      child: Text('Edit'),
-                                    ),
-                                    PopupMenuItem(
-                                      value: 'delete',
-                                      child: Text('Delete'),
-                                    ),
-                                  ],
+                                PopupMenuItem(
+                                  value: 'delete',
+                                  child: Text('Delete'),
                                 ),
                               ],
                             ),
+                          ],
+                        ],
+                      ),
                           ),
                         );
                     }),
               const SizedBox(height: 16),
               _buildReturnsSection(context, theme, purchase.id),
               const SizedBox(height: 24),
-              if (!purchase.isCancelled)
+              if (purchase.isDraft)
+                Row(
+                  children: [
+                    Expanded(
+                      child: FilledButton.icon(
+                        onPressed: () async {
+                          await _controller.completePurchase(purchase.id);
+                        },
+                        icon: const Icon(Icons.check),
+                        label: const Text('Complete Purchase'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () async {
+                          final confirmed =
+                              await _confirmDeleteDraftPurchase(context);
+                          if (confirmed != true) return;
+                          await _controller.deleteDraftPurchase(purchase.id);
+                          if (context.mounted) Navigator.of(context).pop();
+                        },
+                        icon: const Icon(Icons.delete_outline),
+                        label: const Text('Delete Draft'),
+                      ),
+                    ),
+                  ],
+                )
+              else if (!purchase.isCancelled)
                 Row(
                   children: [
                     Expanded(
@@ -966,6 +998,29 @@ class _PurchaseEntryDetailScreenState
           FilledButton(
             onPressed: () => Navigator.of(context).pop(ctrl.text.trim()),
             child: const Text('Cancel purchase'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<bool?> _confirmDeleteDraftPurchase(BuildContext context) async {
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete draft'),
+        content: const Text(
+          'This permanently deletes the draft purchase and its line items. '
+          'This cannot be undone.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Delete'),
           ),
         ],
       ),

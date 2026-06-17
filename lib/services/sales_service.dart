@@ -22,19 +22,6 @@ class SalesService {
 
   List<SalesEntryItem> get salesEntryItems => List.unmodifiable(_entryItems);
 
-  SalesEntry? findSaleByDate(DateTime date) {
-    final normalized = DateTime(date.year, date.month, date.day);
-    for (final entry in _entries) {
-      final entryDate = DateTime(
-        entry.salesDate.year,
-        entry.salesDate.month,
-        entry.salesDate.day,
-      );
-      if (entryDate == normalized) return entry;
-    }
-    return null;
-  }
-
   Future<void> load() async {
     await _repository.init();
     final rows = await _repository.fetchSalesEntries();
@@ -58,48 +45,25 @@ class SalesService {
       return;
     }
     final item = _requireItem(itemId);
-    final cogs = _computeCogs(itemId, quantity);
-    await _purchaseService.consumeStock(
-      itemId: itemId,
-      quantity: quantity,
-    );
-
     final amount = quantity * item.sellingPrice;
     final normalizedDate = _normalizeDate(salesDate);
-    final existing = findSaleByDate(normalizedDate);
-    int entryId;
-    double newAmount;
-    if (existing != null) {
-      entryId = existing.id;
-      newAmount = existing.amount + amount;
-      final updatedEntry = SalesEntry(
-        id: existing.id,
-        salesDate: existing.salesDate,
-        memo: existing.memo,
-        amount: newAmount,
-      );
-      await _repository.updateSalesEntry(updatedEntry);
-      final entryIndex = _entries.indexWhere((e) => e.id == existing.id);
-      if (entryIndex != -1) {
-        _entries[entryIndex] = updatedEntry;
-      }
-    } else {
-      newAmount = amount;
-      final entry = SalesEntry(
-        id: 0,
-        salesDate: normalizedDate,
-        memo: memo,
-        amount: newAmount,
-      );
-      entryId = await _repository.insertSalesEntry(entry);
-      final storedEntry = SalesEntry(
-        id: entryId,
-        salesDate: normalizedDate,
-        memo: memo,
-        amount: newAmount,
-      );
-      _entries.insert(0, storedEntry);
-    }
+
+    final entry = SalesEntry(
+      id: 0,
+      salesDate: normalizedDate,
+      memo: memo,
+      amount: amount,
+      status: 'DRAFT',
+    );
+    final entryId = await _repository.insertSalesEntry(entry);
+    final storedEntry = SalesEntry(
+      id: entryId,
+      salesDate: normalizedDate,
+      memo: memo,
+      amount: amount,
+      status: 'DRAFT',
+    );
+    _entries.insert(0, storedEntry);
 
     final lineItem = SalesEntryItem(
       id: 0,
@@ -107,7 +71,7 @@ class SalesService {
       itemId: itemId,
       quantity: quantity,
       unitPrice: item.sellingPrice,
-      costOfGoodsSold: cogs,
+      costOfGoodsSold: 0,
     );
     final lineItemId = await _repository.insertSalesEntryItem(lineItem);
     _entryItems.add(
@@ -117,17 +81,8 @@ class SalesService {
         itemId: itemId,
         quantity: quantity,
         unitPrice: item.sellingPrice,
-        costOfGoodsSold: cogs,
+        costOfGoodsSold: 0,
       ),
-    );
-    await _inventoryService.recordMovement(
-      itemId: itemId,
-      movementType: 'SALE',
-      quantity: -quantity,
-      unitCost: cogs / quantity,
-      movementDate: normalizedDate,
-      referenceType: 'SALE',
-      referenceId: entryId,
     );
     _sortEntries();
   }
@@ -143,100 +98,182 @@ class SalesService {
     if (index == -1) {
       return;
     }
+    final entry = _entries[index];
+    if (!entry.isDraft) {
+      throw StateError('Cannot edit a completed sale.');
+    }
     if (quantity <= 0) {
       return;
     }
 
-    final existingItems =
-        _entryItems.where((item) => item.salesId == id).toList();
-    for (final item in existingItems) {
-      await _purchaseService.restockFromSale(
-        itemId: item.itemId,
-        quantity: item.quantity,
-      );
-      await _inventoryService.recordMovement(
-        itemId: item.itemId,
-        movementType: 'SALE',
-        quantity: item.quantity,
-        unitCost: item.costOfGoodsSold / item.quantity,
-        movementDate: _normalizeDate(salesDate),
-        referenceType: 'SALE',
-        referenceId: id,
-      );
-    }
+    final item = _requireItem(itemId);
+    final amount = quantity * item.sellingPrice;
+    final normalizedDate = _normalizeDate(salesDate);
+    final updated = SalesEntry(
+      id: id,
+      salesDate: normalizedDate,
+      memo: memo,
+      amount: amount,
+      status: 'DRAFT',
+    );
+    await _repository.updateSalesEntry(updated);
+    _entries[index] = updated;
 
-    try {
-      final item = _requireItem(itemId);
-      final cogs = _computeCogs(itemId, quantity);
-      await _purchaseService.consumeStock(
-        itemId: itemId,
-        quantity: quantity,
-      );
+    await _repository.deleteSalesEntryItemsBySales(id);
+    _entryItems.removeWhere((item) => item.salesId == id);
 
-      final amount = quantity * item.sellingPrice;
-      final normalizedDate = _normalizeDate(salesDate);
-      final updated = SalesEntry(
-        id: id,
-        salesDate: normalizedDate,
-        memo: memo,
-        amount: amount,
-      );
-      await _repository.updateSalesEntry(updated);
-      _entries[index] = updated;
-
-      await _repository.deleteSalesEntryItemsBySales(id);
-      _entryItems.removeWhere((item) => item.salesId == id);
-
-      final lineItem = SalesEntryItem(
-        id: 0,
+    final lineItem = SalesEntryItem(
+      id: 0,
+      salesId: id,
+      itemId: itemId,
+      quantity: quantity,
+      unitPrice: item.sellingPrice,
+      costOfGoodsSold: 0,
+    );
+    final lineItemId = await _repository.insertSalesEntryItem(lineItem);
+    _entryItems.add(
+      SalesEntryItem(
+        id: lineItemId,
         salesId: id,
         itemId: itemId,
         quantity: quantity,
         unitPrice: item.sellingPrice,
+        costOfGoodsSold: 0,
+      ),
+    );
+    _sortEntries();
+  }
+
+  Future<void> completeSale(int id) async {
+    final index = _entries.indexWhere((e) => e.id == id);
+    if (index == -1) return;
+    final sale = _entries[index];
+    if (!sale.isDraft) return;
+
+    final lineItems = _entryItems.where((i) => i.salesId == id).toList();
+
+    for (final lineItem in lineItems) {
+      final cogs = _computeCogs(lineItem.itemId, lineItem.quantity);
+      await _purchaseService.consumeStock(
+        itemId: lineItem.itemId,
+        quantity: lineItem.quantity,
+      );
+
+      final updatedLineItem = SalesEntryItem(
+        id: lineItem.id,
+        salesId: lineItem.salesId,
+        itemId: lineItem.itemId,
+        quantity: lineItem.quantity,
+        unitPrice: lineItem.unitPrice,
         costOfGoodsSold: cogs,
       );
-      final lineItemId = await _repository.insertSalesEntryItem(lineItem);
-      _entryItems.add(
-        SalesEntryItem(
-          id: lineItemId,
-          salesId: id,
-          itemId: itemId,
-          quantity: quantity,
-          unitPrice: item.sellingPrice,
-          costOfGoodsSold: cogs,
-        ),
+      await _repository.updateSalesEntryItem(updatedLineItem);
+      final liIndex =
+          _entryItems.indexWhere((i) => i.id == lineItem.id);
+      if (liIndex != -1) {
+        _entryItems[liIndex] = updatedLineItem;
+      }
+
+      await _inventoryService.recordMovement(
+        itemId: lineItem.itemId,
+        movementType: 'SALE',
+        quantity: -lineItem.quantity,
+        unitCost: cogs / lineItem.quantity,
+        movementDate: sale.salesDate,
+        referenceType: 'SALE',
+        referenceId: sale.id,
+      );
+    }
+
+    final updated = SalesEntry(
+      id: sale.id,
+      salesDate: sale.salesDate,
+      memo: sale.memo,
+      amount: sale.amount,
+      status: 'ACTIVE',
+    );
+    await _repository.updateSalesEntry(updated);
+    _entries[index] = updated;
+  }
+
+  Future<void> voidSale(int id) async {
+    final index = _entries.indexWhere((e) => e.id == id);
+    if (index == -1) return;
+    final sale = _entries[index];
+    if (sale.isVoid) {
+      throw StateError('Sale is already voided.');
+    }
+    if (sale.isDraft) {
+      await deleteSale(id);
+      return;
+    }
+
+    final lineItems = _entryItems.where((i) => i.salesId == id).toList();
+    for (final lineItem in lineItems) {
+      await _purchaseService.restockFromSale(
+        itemId: lineItem.itemId,
+        quantity: lineItem.quantity,
+      );
+    }
+
+    await _inventoryService.deleteMovementsByReference(
+      'SALE',
+      id,
+    );
+
+    final updated = SalesEntry(
+      id: sale.id,
+      salesDate: sale.salesDate,
+      memo: sale.memo,
+      amount: 0,
+      status: 'VOID',
+    );
+    await _repository.updateSalesEntry(updated);
+    _entries[index] = updated;
+  }
+
+  Future<void> reactivateSale(int id) async {
+    final index = _entries.indexWhere((e) => e.id == id);
+    if (index == -1) return;
+    final sale = _entries[index];
+    if (!sale.isVoid) return;
+
+    final lineItems = _entryItems.where((i) => i.salesId == id).toList();
+    double totalAmount = 0;
+    for (final lineItem in lineItems) {
+      await _purchaseService.consumeStock(
+        itemId: lineItem.itemId,
+        quantity: lineItem.quantity,
       );
       await _inventoryService.recordMovement(
-        itemId: itemId,
+        itemId: lineItem.itemId,
         movementType: 'SALE',
-        quantity: -quantity,
-        unitCost: cogs / quantity,
-        movementDate: _normalizeDate(salesDate),
+        quantity: -lineItem.quantity,
+        unitCost: lineItem.costOfGoodsSold / lineItem.quantity,
+        movementDate: sale.salesDate,
         referenceType: 'SALE',
         referenceId: id,
       );
-      _sortEntries();
-    } catch (error) {
-      await _purchaseService.consumeStock(
-        itemId: itemId,
-        quantity: quantity,
-      );
-      rethrow;
+      totalAmount += lineItem.quantity * lineItem.unitPrice;
     }
+
+    final updated = SalesEntry(
+      id: sale.id,
+      salesDate: sale.salesDate,
+      memo: sale.memo,
+      amount: totalAmount,
+      status: 'ACTIVE',
+    );
+    await _repository.updateSalesEntry(updated);
+    _entries[index] = updated;
   }
 
   Future<void> deleteSale(int id) async {
     final index = _entries.indexWhere((entry) => entry.id == id);
-    if (index == -1) {
-      return;
-    }
-    final existingItems =
-        _entryItems.where((item) => item.salesId == id).toList();
-    for (final item in existingItems) {
-      await _purchaseService.restockFromSale(
-        itemId: item.itemId,
-        quantity: item.quantity,
-      );
+    if (index == -1) return;
+    final entry = _entries[index];
+    if (!entry.isDraft) {
+      throw StateError('Cannot delete a completed sale. Void it instead.');
     }
     await _repository.deleteSalesEntryItemsBySales(id);
     await _repository.deleteSalesEntry(id);
@@ -262,12 +299,11 @@ class SalesService {
     required int quantity,
   }) async {
     if (quantity <= 0) return;
+    final sale = _entries.firstWhere((e) => e.id == saleId);
+    if (!sale.isDraft) {
+      throw StateError('Cannot add items to a completed sale.');
+    }
     final item = _requireItem(itemId);
-    final cogs = _computeCogs(itemId, quantity);
-    await _purchaseService.consumeStock(
-      itemId: itemId,
-      quantity: quantity,
-    );
 
     final lineItem = SalesEntryItem(
       id: 0,
@@ -275,7 +311,7 @@ class SalesService {
       itemId: itemId,
       quantity: quantity,
       unitPrice: item.sellingPrice,
-      costOfGoodsSold: cogs,
+      costOfGoodsSold: 0,
     );
     final lineItemId = await _repository.insertSalesEntryItem(lineItem);
     _entryItems.add(
@@ -285,17 +321,8 @@ class SalesService {
         itemId: itemId,
         quantity: quantity,
         unitPrice: item.sellingPrice,
-        costOfGoodsSold: cogs,
+        costOfGoodsSold: 0,
       ),
-    );
-    await _inventoryService.recordMovement(
-      itemId: itemId,
-      movementType: 'SALE',
-      quantity: -quantity,
-      unitCost: cogs / quantity,
-      movementDate: DateTime.now(),
-      referenceType: 'SALE',
-      referenceId: saleId,
     );
 
     final index = _entries.indexWhere((e) => e.id == saleId);
@@ -307,6 +334,7 @@ class SalesService {
         salesDate: entry.salesDate,
         memo: entry.memo,
         amount: newAmount,
+        status: entry.status,
       );
       await _repository.updateSalesEntry(updatedEntry);
       _entries[index] = updatedEntry;
@@ -332,11 +360,10 @@ class SalesService {
     final lineItemIndex = _entryItems.indexWhere((i) => i.id == lineItemId);
     if (lineItemIndex == -1) return;
     final lineItem = _entryItems[lineItemIndex];
-
-    await _purchaseService.restockFromSale(
-      itemId: lineItem.itemId,
-      quantity: lineItem.quantity,
-    );
+    final sale = _entries.firstWhere((e) => e.id == saleId);
+    if (!sale.isDraft) {
+      throw StateError('Cannot delete items from a completed sale.');
+    }
 
     await _repository.deleteSalesEntryItem(lineItemId);
     _entryItems.removeAt(lineItemIndex);
@@ -350,6 +377,7 @@ class SalesService {
         salesDate: entry.salesDate,
         memo: entry.memo,
         amount: newAmount,
+        status: entry.status,
       );
       await _repository.updateSalesEntry(updated);
       _entries[entryIndex] = updated;
@@ -366,19 +394,13 @@ class SalesService {
     if (quantity <= 0) return;
     final oldItemIndex = _entryItems.indexWhere((i) => i.id == lineItemId);
     if (oldItemIndex == -1) return;
+    final sale = _entries.firstWhere((e) => e.id == saleId);
+    if (!sale.isDraft) {
+      throw StateError('Cannot edit items in a completed sale.');
+    }
     final oldItem = _entryItems[oldItemIndex];
 
-    await _purchaseService.restockFromSale(
-      itemId: oldItem.itemId,
-      quantity: oldItem.quantity,
-    );
-
     final item = _requireItem(itemId);
-    final cogs = _computeCogs(itemId, quantity);
-    await _purchaseService.consumeStock(
-      itemId: itemId,
-      quantity: quantity,
-    );
 
     final updatedLineItem = SalesEntryItem(
       id: lineItemId,
@@ -386,7 +408,7 @@ class SalesService {
       itemId: itemId,
       quantity: quantity,
       unitPrice: item.sellingPrice,
-      costOfGoodsSold: cogs,
+      costOfGoodsSold: 0,
     );
     await _repository.updateSalesEntryItem(updatedLineItem);
     _entryItems[oldItemIndex] = updatedLineItem;
@@ -401,6 +423,7 @@ class SalesService {
         salesDate: entry.salesDate,
         memo: entry.memo,
         amount: newAmount,
+        status: entry.status,
       );
       await _repository.updateSalesEntry(updatedEntry);
       _entries[entryIndex] = updatedEntry;

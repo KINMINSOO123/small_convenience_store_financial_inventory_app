@@ -358,30 +358,33 @@ class _SalesEntryDetailScreenState extends State<SalesEntryDetailScreen> {
       appBar: AppBar(
         title: Text('Sale ${_formatDate(widget.sale.salesDate)}'),
         actions: [
-          PopupMenuButton<String>(
-            onSelected: (value) async {
-              if (value == 'delete') {
+          if (widget.sale.isDraft) ...[
+            IconButton(
+              onPressed: _editMemo,
+              icon: const Icon(Icons.edit_outlined),
+              tooltip: 'Edit memo',
+            ),
+            IconButton(
+              onPressed: () async {
                 final confirmed = await _confirmDeleteSale(context);
                 if (confirmed == true) {
                   await _controller.deleteSale(widget.sale.id);
                   if (context.mounted) Navigator.of(context).pop();
                 }
-              } else if (value == 'edit_memo') {
-                await _editMemo();
-              }
-            },
-            itemBuilder: (context) => const [
-              PopupMenuItem(value: 'edit_memo', child: Text('Edit memo')),
-              PopupMenuItem(value: 'delete', child: Text('Delete')),
-            ],
-          ),
+              },
+              icon: const Icon(Icons.delete_outline),
+              tooltip: 'Delete draft',
+            ),
+          ],
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: _addItem,
-        icon: const Icon(Icons.add),
-        label: const Text('Add item'),
-      ),
+      floatingActionButton: widget.sale.isDraft
+          ? FloatingActionButton.extended(
+              onPressed: _addItem,
+              icon: const Icon(Icons.add),
+              label: const Text('Add item'),
+            )
+          : null,
       body: AnimatedBuilder(
         animation: _controller,
         builder: (context, _) {
@@ -399,9 +402,43 @@ class _SalesEntryDetailScreenState extends State<SalesEntryDetailScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        _formatDate(sale.salesDate),
-                        style: theme.textTheme.titleLarge,
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              _formatDate(sale.salesDate),
+                              style: theme.textTheme.titleLarge,
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: sale.isDraft
+                                  ? theme.colorScheme.tertiaryContainer
+                                  : sale.isVoid
+                                      ? theme.colorScheme.errorContainer
+                                      : theme.colorScheme.primaryContainer,
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Text(
+                              sale.isDraft
+                                  ? 'Draft'
+                                  : sale.isVoid
+                                      ? 'Void'
+                                      : 'Completed',
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: sale.isDraft
+                                    ? theme.colorScheme.onTertiaryContainer
+                                    : sale.isVoid
+                                        ? theme.colorScheme.onErrorContainer
+                                        : theme.colorScheme.onPrimaryContainer,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                       if (sale.memo.isNotEmpty) ...[
                         const SizedBox(height: 8),
@@ -425,7 +462,81 @@ class _SalesEntryDetailScreenState extends State<SalesEntryDetailScreen> {
               if (items.isEmpty)
                 const Center(child: Text('No items.'))
               else
-                ...items.map((item) {
+              const SizedBox(height: 24),
+              if (sale.isDraft)
+                Row(
+                  children: [
+                    Expanded(
+                      child: FilledButton.icon(
+                        onPressed: () async {
+                          await _controller.completeSale(sale.id);
+                        },
+                        icon: const Icon(Icons.check),
+                        label: const Text('Complete Sale'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () async {
+                          final confirmed =
+                              await _confirmDeleteDraftSale(context);
+                          if (confirmed != true) return;
+                          await _controller.deleteSale(sale.id);
+                          if (context.mounted) Navigator.of(context).pop();
+                        },
+                        icon: const Icon(Icons.delete_outline),
+                        label: const Text('Delete Draft'),
+                      ),
+                    ),
+                  ],
+                )
+              else if (!sale.isVoid)
+                Center(
+                  child: OutlinedButton.icon(
+                    onPressed: () async {
+                      final confirmed =
+                          await _confirmVoidSale(context);
+                      if (confirmed != true) return;
+                      await _controller.voidSale(sale.id);
+                    },
+                    icon: const Icon(Icons.cancel_outlined),
+                    label: const Text('Void Sale'),
+                  ),
+                )
+              else
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () async {
+                          final confirmed =
+                              await _confirmReactivateSale(context);
+                          if (confirmed != true) return;
+                          await _controller.reactivateSale(sale.id);
+                        },
+                        icon: const Icon(Icons.refresh_outlined),
+                        label: const Text('Reactivate'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () async {
+                          final confirmed =
+                              await _confirmDeleteSale(context);
+                          if (confirmed != true) return;
+                          await _controller.deleteSale(sale.id);
+                          if (context.mounted) Navigator.of(context).pop();
+                        },
+                        icon: const Icon(Icons.delete_outline),
+                        label: const Text('Delete permanently'),
+                      ),
+                    ),
+                  ],
+                ),
+              const SizedBox(height: 16),
+              ...items.map((item) {
                   final invItem =
                       _inventoryController.getItemById(item.itemId);
                   final name = invItem?.name ?? 'Item #${item.itemId}';
@@ -458,29 +569,30 @@ class _SalesEntryDetailScreenState extends State<SalesEntryDetailScreen> {
                               ),
                             ],
                           ),
-                          PopupMenuButton<String>(
-                            onSelected: (value) {
-                              if (value == 'edit') {
-                                _editLineItem(
-                                  item.id,
-                                  item.itemId,
-                                  item.quantity,
-                                );
-                              } else if (value == 'delete') {
-                                _deleteLineItem(item.id);
-                              }
-                            },
-                            itemBuilder: (context) => const [
-                              PopupMenuItem(
-                                value: 'edit',
-                                child: Text('Edit'),
-                              ),
-                              PopupMenuItem(
-                                value: 'delete',
-                                child: Text('Delete'),
-                              ),
-                            ],
-                          ),
+                          if (sale.isDraft)
+                            PopupMenuButton<String>(
+                              onSelected: (value) {
+                                if (value == 'edit') {
+                                  _editLineItem(
+                                    item.id,
+                                    item.itemId,
+                                    item.quantity,
+                                  );
+                                } else if (value == 'delete') {
+                                  _deleteLineItem(item.id);
+                                }
+                              },
+                              itemBuilder: (context) => const [
+                                PopupMenuItem(
+                                  value: 'edit',
+                                  child: Text('Edit'),
+                                ),
+                                PopupMenuItem(
+                                  value: 'delete',
+                                  child: Text('Delete'),
+                                ),
+                              ],
+                            ),
                         ],
                       ),
                     ),
@@ -489,6 +601,72 @@ class _SalesEntryDetailScreenState extends State<SalesEntryDetailScreen> {
             ],
           );
         },
+      ),
+    );
+  }
+
+  Future<bool?> _confirmDeleteDraftSale(BuildContext context) async {
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete draft'),
+        content: const Text(
+          'This permanently deletes the draft sale and its line items.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<bool?> _confirmVoidSale(BuildContext context) async {
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Void sale'),
+        content: const Text(
+          'This will reverse all stock effects of this sale. Continue?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Void'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<bool?> _confirmReactivateSale(BuildContext context) async {
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Reactivate sale'),
+        content: const Text(
+          'This will re-consume stock and record sale movements. Continue?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Reactivate'),
+          ),
+        ],
       ),
     );
   }

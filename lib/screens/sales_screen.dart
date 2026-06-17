@@ -27,6 +27,7 @@ class _SalesScreenState extends State<SalesScreen> {
       widget.inventoryController;
   DateTime? _startDate;
   DateTime? _endDate;
+  bool _todayFilter = false;
 
   SalesEntryItem? _firstLineItem(SalesEntry entry) {
     return _controller.salesEntryItems
@@ -263,12 +264,15 @@ class _SalesScreenState extends State<SalesScreen> {
   }
 
   bool _isWithinRange(DateTime date) {
+    final normalized = DateTime(date.year, date.month, date.day);
+    final today = DateTime.now();
+    final todayNormalized = DateTime(today.year, today.month, today.day);
+    if (_todayFilter && normalized != todayNormalized) return false;
     final start = _startDate;
     final end = _endDate;
     if (start == null && end == null) {
       return true;
     }
-    final normalized = DateTime(date.year, date.month, date.day);
     final startNormalized = start == null
         ? null
         : DateTime(start.year, start.month, start.day);
@@ -303,10 +307,17 @@ class _SalesScreenState extends State<SalesScreen> {
     });
   }
 
+  void _toggleTodayFilter() {
+    setState(() {
+      _todayFilter = !_todayFilter;
+    });
+  }
+
   void _clearDateFilter() {
     setState(() {
       _startDate = null;
       _endDate = null;
+      _todayFilter = false;
     });
   }
 
@@ -366,6 +377,16 @@ class _SalesScreenState extends State<SalesScreen> {
                       ),
                       child: Row(
                         children: [
+                          _todayFilter
+                              ? FilledButton(
+                                  onPressed: _toggleTodayFilter,
+                                  child: const Text('Today'),
+                                )
+                              : OutlinedButton(
+                                  onPressed: _toggleTodayFilter,
+                                  child: const Text('Today'),
+                                ),
+                          const SizedBox(width: 8),
                           Expanded(
                             child: OutlinedButton(
                               onPressed: _pickDateRange,
@@ -384,6 +405,44 @@ class _SalesScreenState extends State<SalesScreen> {
                         ],
                       ),
                     ),
+                    const SizedBox(height: 4),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: DropdownButtonFormField<SalesFilter>(
+                        value: _controller.salesFilter,
+                        decoration: const InputDecoration(
+                          labelText: 'Filter sales',
+                          isDense: true,
+                          contentPadding: EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
+                        ),
+                        items: const [
+                          DropdownMenuItem(
+                            value: SalesFilter.all,
+                            child: Text('All'),
+                          ),
+                          DropdownMenuItem(
+                            value: SalesFilter.draft,
+                            child: Text('Draft'),
+                          ),
+                          DropdownMenuItem(
+                            value: SalesFilter.active,
+                            child: Text('Active'),
+                          ),
+                          DropdownMenuItem(
+                            value: SalesFilter.void_,
+                            child: Text('Void'),
+                          ),
+                        ],
+                        onChanged: (value) {
+                          if (value == null) return;
+                          _controller.setSalesFilter(value);
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 8),
                     if (sales.isEmpty)
                       const Expanded(
                         child: Center(
@@ -409,9 +468,17 @@ class _SalesScreenState extends State<SalesScreen> {
                                 vertical: 6,
                               ),
                               leading: CircleAvatar(
-                                backgroundColor: Theme.of(context)
-                                    .colorScheme
-                                    .primaryContainer,
+                                backgroundColor: entry.isDraft
+                                    ? Theme.of(context)
+                                        .colorScheme
+                                        .tertiaryContainer
+                                    : entry.isVoid
+                                        ? Theme.of(context)
+                                            .colorScheme
+                                            .errorContainer
+                                        : Theme.of(context)
+                                            .colorScheme
+                                            .primaryContainer,
                                 child: const Icon(Icons.point_of_sale_outlined),
                               ),
                               title: Row(

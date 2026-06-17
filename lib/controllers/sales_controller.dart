@@ -13,10 +13,27 @@ class SalesController extends ChangeNotifier {
   final SalesService _service;
   final VoidCallback? onInventoryChanged;
   bool _isLoading = false;
+  SalesFilter _salesFilter = SalesFilter.all;
 
   bool get isLoading => _isLoading;
 
-  List<SalesEntry> get salesEntries => _service.salesEntries;
+  SalesFilter get salesFilter => _salesFilter;
+
+  List<SalesEntry> get salesEntries {
+    final list = _service.salesEntries.toList();
+    switch (_salesFilter) {
+      case SalesFilter.draft:
+        return List.unmodifiable(list.where((entry) => entry.isDraft));
+      case SalesFilter.active:
+        return List.unmodifiable(
+          list.where((entry) => !entry.isDraft && !entry.isVoid),
+        );
+      case SalesFilter.void_:
+        return List.unmodifiable(list.where((entry) => entry.isVoid));
+      case SalesFilter.all:
+        return List.unmodifiable(list);
+    }
+  }
 
   List<SalesEntryItem> get salesEntryItems => _service.salesEntryItems;
 
@@ -26,10 +43,6 @@ class SalesController extends ChangeNotifier {
 
   List<SalesEntryItem> salesEntryItemsForSale(int salesId) {
     return _service.salesEntryItemsForSale(salesId);
-  }
-
-  SalesEntry? findSaleByDate(DateTime date) {
-    return _service.findSaleByDate(date);
   }
 
   Future<void> addLineItemToSale({
@@ -69,6 +82,29 @@ class SalesController extends ChangeNotifier {
       itemId: itemId,
       quantity: quantity,
     );
+    onInventoryChanged?.call();
+    notifyListeners();
+  }
+
+  Future<void> setSalesFilter(SalesFilter filter) async {
+    _salesFilter = filter;
+    notifyListeners();
+  }
+
+  Future<void> completeSale(int id) async {
+    await _service.completeSale(id);
+    onInventoryChanged?.call();
+    notifyListeners();
+  }
+
+  Future<void> voidSale(int id) async {
+    await _service.voidSale(id);
+    onInventoryChanged?.call();
+    notifyListeners();
+  }
+
+  Future<void> reactivateSale(int id) async {
+    await _service.reactivateSale(id);
     onInventoryChanged?.call();
     notifyListeners();
   }
@@ -121,3 +157,5 @@ class SalesController extends ChangeNotifier {
     notifyListeners();
   }
 }
+
+enum SalesFilter { all, draft, active, void_ }

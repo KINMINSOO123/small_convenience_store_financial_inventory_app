@@ -18,6 +18,7 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
   ExpensesController get _controller => widget.controller;
   DateTime? _startDate;
   DateTime? _endDate;
+  bool _todayFilter = false;
 
   Future<void> _showExpenseDialog({JournalEntry? existing}) async {
     final amountController = TextEditingController(
@@ -214,12 +215,15 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
   }
 
   bool _isWithinRange(DateTime date) {
+    final normalized = DateTime(date.year, date.month, date.day);
+    final today = DateTime.now();
+    final todayNormalized = DateTime(today.year, today.month, today.day);
+    if (_todayFilter && normalized != todayNormalized) return false;
     final start = _startDate;
     final end = _endDate;
     if (start == null && end == null) {
       return true;
     }
-    final normalized = DateTime(date.year, date.month, date.day);
     final startNormalized = start == null
         ? null
         : DateTime(start.year, start.month, start.day);
@@ -256,10 +260,17 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
     });
   }
 
+  void _toggleTodayFilter() {
+    setState(() {
+      _todayFilter = !_todayFilter;
+    });
+  }
+
   void _clearDateFilter() {
     setState(() {
       _startDate = null;
       _endDate = null;
+      _todayFilter = false;
     });
   }
 
@@ -316,6 +327,16 @@ class _ExpensesScreenState extends State<ExpensesScreen> {
                       ),
                       child: Row(
                         children: [
+                          _todayFilter
+                              ? FilledButton(
+                                  onPressed: _toggleTodayFilter,
+                                  child: const Text('Today'),
+                                )
+                              : OutlinedButton(
+                                  onPressed: _toggleTodayFilter,
+                                  child: const Text('Today'),
+                                ),
+                          const SizedBox(width: 8),
                           Expanded(
                             child: OutlinedButton(
                               onPressed: _pickDateRange,

@@ -1,7 +1,5 @@
-import '../models/inventory_movement.dart';
 import '../models/supplier_return.dart';
 import '../models/supplier_return_item.dart';
-import '../repositories/inventory_repository.dart';
 import '../repositories/supplier_return_repository.dart';
 import 'inventory_service.dart';
 import 'purchase_service.dart';
@@ -23,38 +21,29 @@ class SupplierReturnService {
     this._repository,
     this._purchaseService,
     this._inventoryService,
-    this._inventoryRepository,
   );
 
   final SupplierReturnRepository _repository;
   final PurchaseService _purchaseService;
   final InventoryService _inventoryService;
-  final InventoryRepository _inventoryRepository;
 
   final List<SupplierReturn> _returns = [];
   final List<SupplierReturnItem> _returnItems = [];
-  final List<InventoryMovement> _movements = [];
 
   List<SupplierReturn> get returns => List.unmodifiable(_returns);
 
   List<SupplierReturnItem> get returnItems => List.unmodifiable(_returnItems);
 
-  List<InventoryMovement> get movements => List.unmodifiable(_movements);
-
   Future<void> load() async {
     await _repository.init();
     final returns = await _repository.fetchSupplierReturns();
     final items = await _repository.fetchSupplierReturnItems();
-    final movements = await _inventoryRepository.fetchInventoryMovements();
     _returns
       ..clear()
       ..addAll(returns);
     _returnItems
       ..clear()
       ..addAll(items);
-    _movements
-      ..clear()
-      ..addAll(movements);
   }
 
   Future<int> createReturn({
@@ -93,13 +82,13 @@ class SupplierReturnService {
       }
 
       final available =
-          _purchaseService.availableQuantityForItem(draft.itemId);
+          _purchaseService.availableQuantityForPurchaseItem(draft.purchaseItemId);
       if (available < draft.quantity) {
         final item = _inventoryService.getItemById(draft.itemId);
         final name = item?.name ?? 'Item #${draft.itemId}';
         throw StateError(
-          'Stock is not enough to return. $name has only $available '
-          'units available, but ${draft.quantity} requested.',
+          'Not enough stock to return. $name has only $available '
+          'units from this purchase line item, but ${draft.quantity} requested.',
         );
       }
 
@@ -156,14 +145,14 @@ class SupplierReturnService {
       );
       _returnItems.add(storedItem);
 
-      await _purchaseService.consumeStock(
+      await _purchaseService.consumeStockFromPurchaseItem(
+        purchaseItemId: item.purchaseItemId,
         itemId: item.itemId,
         quantity: item.quantity,
       );
 
-      await _recordMovement(
+      await _inventoryService.recordMovement(
         itemId: item.itemId,
-        batchId: null,
         movementType: 'SUPPLIER_RETURN',
         quantity: -item.quantity,
         unitCost: item.unitCost,
@@ -183,12 +172,9 @@ class SupplierReturnService {
     final items =
         _returnItems.where((i) => i.returnId == returnId).toList();
 
-    await _inventoryRepository.deleteInventoryMovementsByReference(
+    await _inventoryService.deleteMovementsByReference(
       'SUPPLIER_RETURN',
       returnId,
-    );
-    _movements.removeWhere(
-      (m) => m.referenceType == 'SUPPLIER_RETURN' && m.referenceId == returnId,
     );
 
     await _repository.deleteSupplierReturnItemsByReturn(returnId);
@@ -198,7 +184,8 @@ class SupplierReturnService {
     _returns.removeAt(returnIndex);
 
     for (final item in items) {
-      await _purchaseService.restockFromSale(
+      await _purchaseService.restockFromReturn(
+        purchaseItemId: item.purchaseItemId,
         itemId: item.itemId,
         quantity: item.quantity,
       );
@@ -223,40 +210,5 @@ class SupplierReturnService {
     return _returnItems
         .where((i) => i.purchaseItemId == purchaseItemId)
         .fold(0.0, (sum, i) => sum + i.subtotal);
-  }
-
-  Future<void> _recordMovement({
-    required int itemId,
-    int? batchId,
-    required String movementType,
-    required int quantity,
-    required double unitCost,
-    required DateTime movementDate,
-    required String referenceType,
-    required int referenceId,
-  }) async {
-    final movement = InventoryMovement(
-      id: 0,
-      itemId: itemId,
-      batchId: batchId,
-      movementType: movementType,
-      quantity: quantity,
-      unitCost: unitCost,
-      movementDate: movementDate,
-      referenceType: referenceType,
-      referenceId: referenceId,
-    );
-    final id = await _inventoryRepository.insertInventoryMovement(movement);
-    _movements.add(InventoryMovement(
-      id: id,
-      itemId: itemId,
-      batchId: batchId,
-      movementType: movementType,
-      quantity: quantity,
-      unitCost: unitCost,
-      movementDate: movementDate,
-      referenceType: referenceType,
-      referenceId: referenceId,
-    ));
   }
 }

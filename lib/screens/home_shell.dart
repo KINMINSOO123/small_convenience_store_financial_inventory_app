@@ -51,7 +51,6 @@ class _HomeShellState extends State<HomeShell> {
         _supplierReturnRepository,
         _purchaseService,
         _inventoryService,
-        _inventoryRepository,
       );
   late final SupplierReturnController _supplierReturnController =
       SupplierReturnController(

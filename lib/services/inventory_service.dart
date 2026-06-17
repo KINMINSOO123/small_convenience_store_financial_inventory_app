@@ -78,6 +78,19 @@ class InventoryService {
     ));
   }
 
+  Future<void> deleteMovementsByReference(
+    String referenceType,
+    int referenceId,
+  ) async {
+    await _repository.deleteInventoryMovementsByReference(
+      referenceType,
+      referenceId,
+    );
+    _movements.removeWhere(
+      (m) => m.referenceType == referenceType && m.referenceId == referenceId,
+    );
+  }
+
   Future<void> load() async {
     await _repository.init();
     await _runInventoryExpiryCleanup();

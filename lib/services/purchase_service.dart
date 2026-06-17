@@ -36,7 +36,7 @@ class PurchaseService {
         entry.purchaseDate.month,
         entry.purchaseDate.day,
       );
-      if (entryDate == normalized && !entry.isCancelled) return entry;
+      if (entryDate == normalized && entry.isDraft) return entry;
     }
     return null;
   }
@@ -65,7 +65,7 @@ class PurchaseService {
       id: 0,
       purchaseDate: purchaseDate,
       memo: memo,
-      status: 'ACTIVE',
+      status: 'DRAFT',
       cancelReason: null,
     );
     final purchaseId = await _repository.insertPurchase(purchase);
@@ -73,7 +73,7 @@ class PurchaseService {
       id: purchaseId,
       purchaseDate: purchaseDate,
       memo: memo,
-      status: 'ACTIVE',
+      status: 'DRAFT',
       cancelReason: null,
     );
     _purchases.insert(0, storedPurchase);
@@ -121,43 +121,80 @@ class PurchaseService {
       expiryDate: expiryDate,
     );
     _purchaseEntryItems.add(storedLineItem);
-
-    final batch = StockBatch(
-      id: 0,
-      itemId: itemId,
-      purchaseId: purchaseId,
-      purchaseItemId: lineItemId,
-      receivedAt: normalizedDate,
-      quantity: quantity,
-      remainingQuantity: quantity,
-      unitCost: unitCost,
-      expiryDate: expiryDate,
-    );
-    final batchId = await _repository.insertBatch(batch);
-    final storedBatch = StockBatch(
-      id: batchId,
-      itemId: itemId,
-      purchaseId: purchaseId,
-      purchaseItemId: lineItemId,
-      receivedAt: normalizedDate,
-      quantity: quantity,
-      remainingQuantity: quantity,
-      unitCost: unitCost,
-      expiryDate: expiryDate,
-    );
-    _batches.add(storedBatch);
-
-    await _updateItemQuantity(itemId, quantityDelta: quantity);
-    await _inventoryService.recordMovement(
-      itemId: itemId,
-      movementType: 'PURCHASE',
-      quantity: quantity,
-      unitCost: unitCost,
-      movementDate: normalizedDate,
-      referenceType: 'PURCHASE',
-      referenceId: purchaseId,
-    );
     return purchaseId;
+  }
+
+  Future<void> completePurchase(int id) async {
+    final index = _purchases.indexWhere((p) => p.id == id);
+    if (index == -1) return;
+    final purchase = _purchases[index];
+    if (!purchase.isDraft) return;
+
+    final lineItems =
+        _purchaseEntryItems.where((i) => i.purchaseId == id).toList();
+
+    for (final lineItem in lineItems) {
+      final batch = StockBatch(
+        id: 0,
+        itemId: lineItem.itemId,
+        purchaseId: purchase.id,
+        purchaseItemId: lineItem.id,
+        receivedAt: purchase.purchaseDate,
+        quantity: lineItem.quantity,
+        remainingQuantity: lineItem.quantity,
+        unitCost: lineItem.unitCost,
+        expiryDate: lineItem.expiryDate,
+      );
+      final batchId = await _repository.insertBatch(batch);
+      _batches.add(StockBatch(
+        id: batchId,
+        itemId: lineItem.itemId,
+        purchaseId: purchase.id,
+        purchaseItemId: lineItem.id,
+        receivedAt: purchase.purchaseDate,
+        quantity: lineItem.quantity,
+        remainingQuantity: lineItem.quantity,
+        unitCost: lineItem.unitCost,
+        expiryDate: lineItem.expiryDate,
+      ));
+
+      await _updateItemQuantity(
+        lineItem.itemId,
+        quantityDelta: lineItem.quantity,
+      );
+      await _inventoryService.recordMovement(
+        itemId: lineItem.itemId,
+        movementType: 'PURCHASE',
+        quantity: lineItem.quantity,
+        unitCost: lineItem.unitCost,
+        movementDate: purchase.purchaseDate,
+        referenceType: 'PURCHASE',
+        referenceId: purchase.id,
+      );
+    }
+
+    final updated = PurchaseEntry(
+      id: purchase.id,
+      purchaseDate: purchase.purchaseDate,
+      memo: purchase.memo,
+      status: 'ACTIVE',
+      cancelReason: null,
+    );
+    await _repository.updatePurchase(updated);
+    _purchases[index] = updated;
+  }
+
+  Future<void> deleteDraftPurchase(int id) async {
+    final index = _purchases.indexWhere((p) => p.id == id);
+    if (index == -1) return;
+    final purchase = _purchases[index];
+    if (!purchase.isDraft) return;
+
+    await _repository.deletePurchaseEntryItemsByPurchase(id);
+    _purchaseEntryItems.removeWhere((i) => i.purchaseId == id);
+
+    await _repository.deletePurchase(id);
+    _purchases.removeAt(index);
   }
 
   Future<void> updatePurchase({
@@ -175,41 +212,22 @@ class PurchaseService {
     if (existing.isCancelled) {
       return;
     }
+    if (!existing.isDraft) {
+      throw StateError('Cannot edit a completed purchase.');
+    }
 
     await _repository.updatePurchase(
       PurchaseEntry(
         id: existing.id,
         purchaseDate: purchaseDate,
         memo: memo ?? existing.memo,
-        status: 'ACTIVE',
+        status: 'DRAFT',
         cancelReason: null,
       ),
     );
 
-    final oldLineItems =
-        _purchaseEntryItems.where((i) => i.purchaseId == existing.id).toList();
-
     await _repository.deletePurchaseEntryItemsByPurchase(existing.id);
     _purchaseEntryItems.removeWhere((i) => i.purchaseId == existing.id);
-
-    await _repository.deleteBatchesByPurchaseId(existing.id);
-    _batches.removeWhere((batch) => batch.purchaseId == existing.id);
-
-    for (final oldItem in oldLineItems) {
-      await _updateItemQuantity(
-        oldItem.itemId,
-        quantityDelta: -oldItem.quantity,
-      );
-      await _inventoryService.recordMovement(
-        itemId: oldItem.itemId,
-        movementType: 'CANCEL_PURCHASE',
-        quantity: -oldItem.quantity,
-        unitCost: oldItem.unitCost,
-        movementDate: purchaseDate,
-        referenceType: 'PURCHASE',
-        referenceId: existing.id,
-      );
-    }
 
     final newItem = PurchaseEntryItem(
       id: 0,
@@ -231,50 +249,13 @@ class PurchaseService {
       ),
     );
 
-    final newBatch = StockBatch(
-      id: 0,
-      itemId: itemId,
-      purchaseId: existing.id,
-      purchaseItemId: lineItemId,
-      receivedAt: purchaseDate,
-      quantity: quantity,
-      remainingQuantity: quantity,
-      unitCost: unitCost,
-      expiryDate: expiryDate,
-    );
-    final batchId = await _repository.insertBatch(newBatch);
-    _batches.add(
-      StockBatch(
-        id: batchId,
-        itemId: itemId,
-        purchaseId: existing.id,
-        purchaseItemId: lineItemId,
-        receivedAt: purchaseDate,
-        quantity: quantity,
-        remainingQuantity: quantity,
-        unitCost: unitCost,
-        expiryDate: expiryDate,
-      ),
-    );
-
-    await _updateItemQuantity(itemId, quantityDelta: quantity);
-    await _inventoryService.recordMovement(
-      itemId: itemId,
-      movementType: 'PURCHASE',
-      quantity: quantity,
-      unitCost: unitCost,
-      movementDate: purchaseDate,
-      referenceType: 'PURCHASE',
-      referenceId: existing.id,
-    );
-
     final index = _purchases.indexWhere((entry) => entry.id == existing.id);
     if (index != -1) {
       _purchases[index] = PurchaseEntry(
         id: existing.id,
         purchaseDate: purchaseDate,
         memo: memo ?? existing.memo,
-        status: 'ACTIVE',
+        status: 'DRAFT',
         cancelReason: null,
       );
     }
@@ -295,6 +276,9 @@ class PurchaseService {
     final purchase = _purchases[index];
     if (purchase.isCancelled) {
       return;
+    }
+    if (purchase.isDraft) {
+      throw StateError('Cannot cancel a draft purchase. Delete it instead.');
     }
 
     final purchaseBatches =
@@ -524,6 +508,90 @@ class PurchaseService {
     await _updateItemQuantity(itemId, quantityDelta: quantity);
   }
 
+  List<StockBatch> batchesForPurchaseItem(int purchaseItemId) {
+    return _batches
+        .where((b) => b.purchaseItemId == purchaseItemId && b.remainingQuantity > 0)
+        .toList();
+  }
+
+  int availableQuantityForPurchaseItem(int purchaseItemId) {
+    return batchesForPurchaseItem(purchaseItemId)
+        .fold(0, (sum, b) => sum + b.remainingQuantity);
+  }
+
+  Future<void> consumeStockFromPurchaseItem({
+    required int purchaseItemId,
+    required int itemId,
+    required int quantity,
+  }) async {
+    if (quantity <= 0) return;
+    final available = availableQuantityForPurchaseItem(purchaseItemId);
+    if (available < quantity) {
+      throw StateError('Not enough stock available for this purchase line item.');
+    }
+
+    var remaining = quantity;
+    final sortedBatches = batchesForPurchaseItem(purchaseItemId)
+      ..sort(_compareRotationPriority);
+    for (final batch in sortedBatches) {
+      if (remaining <= 0) break;
+      if (batch.remainingQuantity <= 0) continue;
+      final deduct = remaining < batch.remainingQuantity
+          ? remaining
+          : batch.remainingQuantity;
+      final updated = StockBatch(
+        id: batch.id,
+        itemId: batch.itemId,
+        purchaseId: batch.purchaseId,
+        purchaseItemId: batch.purchaseItemId,
+        receivedAt: batch.receivedAt,
+        quantity: batch.quantity,
+        remainingQuantity: batch.remainingQuantity - deduct,
+        unitCost: batch.unitCost,
+        expiryDate: batch.expiryDate,
+      );
+      await _repository.updateBatch(updated);
+      _replaceBatch(updated);
+      remaining -= deduct;
+    }
+
+    await _updateItemQuantity(itemId, quantityDelta: -quantity);
+  }
+
+  Future<void> restockFromReturn({
+    required int purchaseItemId,
+    required int itemId,
+    required int quantity,
+  }) async {
+    if (quantity <= 0) return;
+    var remaining = quantity;
+    final batches = _batches
+        .where((b) => b.purchaseItemId == purchaseItemId)
+        .toList()
+      ..sort((a, b) => b.id.compareTo(a.id));
+    for (final batch in batches) {
+      if (remaining <= 0) break;
+      final capacity = batch.quantity - batch.remainingQuantity;
+      if (capacity <= 0) continue;
+      final add = remaining < capacity ? remaining : capacity;
+      final updated = StockBatch(
+        id: batch.id,
+        itemId: batch.itemId,
+        purchaseId: batch.purchaseId,
+        purchaseItemId: batch.purchaseItemId,
+        receivedAt: batch.receivedAt,
+        quantity: batch.quantity,
+        remainingQuantity: batch.remainingQuantity + add,
+        unitCost: batch.unitCost,
+        expiryDate: batch.expiryDate,
+      );
+      await _repository.updateBatch(updated);
+      _replaceBatch(updated);
+      remaining -= add;
+    }
+    await _updateItemQuantity(itemId, quantityDelta: quantity);
+  }
+
   double totalForPurchase(int purchaseId) {
     try {
       final purchase = _purchases.firstWhere((p) => p.id == purchaseId);
@@ -556,6 +624,9 @@ class PurchaseService {
     if (purchase.isCancelled) {
       throw StateError('Cannot add items to a cancelled purchase.');
     }
+    if (!purchase.isDraft) {
+      throw StateError('Cannot add items to a completed purchase.');
+    }
 
     final lineItem = PurchaseEntryItem(
       id: 0,
@@ -574,41 +645,6 @@ class PurchaseService {
       unitCost: unitCost,
       expiryDate: expiryDate,
     ));
-
-    final batch = StockBatch(
-      id: 0,
-      itemId: itemId,
-      purchaseId: purchaseId,
-      purchaseItemId: lineItemId,
-      receivedAt: purchase.purchaseDate,
-      quantity: quantity,
-      remainingQuantity: quantity,
-      unitCost: unitCost,
-      expiryDate: expiryDate,
-    );
-    final batchId = await _repository.insertBatch(batch);
-    _batches.add(StockBatch(
-      id: batchId,
-      itemId: itemId,
-      purchaseId: purchaseId,
-      purchaseItemId: lineItemId,
-      receivedAt: purchase.purchaseDate,
-      quantity: quantity,
-      remainingQuantity: quantity,
-      unitCost: unitCost,
-      expiryDate: expiryDate,
-    ));
-
-    await _updateItemQuantity(itemId, quantityDelta: quantity);
-    await _inventoryService.recordMovement(
-      itemId: itemId,
-      movementType: 'PURCHASE',
-      quantity: quantity,
-      unitCost: unitCost,
-      movementDate: purchase.purchaseDate,
-      referenceType: 'PURCHASE',
-      referenceId: purchaseId,
-    );
   }
 
   Future<void> updatePurchaseEntryMemo(int purchaseId, String? memo) async {
@@ -633,30 +669,13 @@ class PurchaseService {
     final lineItemIndex =
         _purchaseEntryItems.indexWhere((i) => i.id == lineItemId);
     if (lineItemIndex == -1) return;
-    final lineItem = _purchaseEntryItems[lineItemIndex];
     final purchase = _purchases.firstWhere((p) => p.id == purchaseId);
     if (purchase.isCancelled) return;
-
-    await _updateItemQuantity(
-      lineItem.itemId,
-      quantityDelta: -lineItem.quantity,
-    );
-    await _inventoryService.recordMovement(
-      itemId: lineItem.itemId,
-      movementType: 'CANCEL_PURCHASE',
-      quantity: -lineItem.quantity,
-      unitCost: lineItem.unitCost,
-      movementDate: purchase.purchaseDate,
-      referenceType: 'PURCHASE',
-      referenceId: purchaseId,
-    );
-
-    final batchIndex = _batches.indexWhere(
-      (b) => b.purchaseId == purchaseId && b.itemId == lineItem.itemId,
-    );
-    if (batchIndex != -1) {
-      await _repository.deleteBatch(_batches[batchIndex].id);
-      _batches.removeAt(batchIndex);
+    if (!purchase.isDraft) {
+      throw StateError(
+        'Cannot delete items from a completed purchase. '
+        'Use Return to Supplier instead.',
+      );
     }
 
     await _repository.deletePurchaseEntryItem(lineItemId);
@@ -677,32 +696,12 @@ class PurchaseService {
     final oldItemIndex =
         _purchaseEntryItems.indexWhere((i) => i.id == lineItemId);
     if (oldItemIndex == -1) return;
-    final oldItem = _purchaseEntryItems[oldItemIndex];
     final purchase = _purchases.firstWhere((p) => p.id == purchaseId);
     if (purchase.isCancelled) {
       throw StateError('Cannot edit items in a cancelled purchase.');
     }
-
-    await _updateItemQuantity(
-      oldItem.itemId,
-      quantityDelta: -oldItem.quantity,
-    );
-    await _inventoryService.recordMovement(
-      itemId: oldItem.itemId,
-      movementType: 'CANCEL_PURCHASE',
-      quantity: -oldItem.quantity,
-      unitCost: oldItem.unitCost,
-      movementDate: purchase.purchaseDate,
-      referenceType: 'PURCHASE',
-      referenceId: purchaseId,
-    );
-
-    final oldBatchIndex = _batches.indexWhere(
-      (b) => b.purchaseId == purchaseId && b.itemId == oldItem.itemId,
-    );
-    if (oldBatchIndex != -1) {
-      await _repository.deleteBatch(_batches[oldBatchIndex].id);
-      _batches.removeAt(oldBatchIndex);
+    if (!purchase.isDraft) {
+      throw StateError('Cannot edit items in a completed purchase.');
     }
 
     final updatedLineItem = PurchaseEntryItem(
@@ -715,41 +714,6 @@ class PurchaseService {
     );
     await _repository.updatePurchaseEntryItem(updatedLineItem);
     _purchaseEntryItems[oldItemIndex] = updatedLineItem;
-
-    final newBatch = StockBatch(
-      id: 0,
-      itemId: itemId,
-      purchaseId: purchaseId,
-      purchaseItemId: lineItemId,
-      receivedAt: purchase.purchaseDate,
-      quantity: quantity,
-      remainingQuantity: quantity,
-      unitCost: unitCost,
-      expiryDate: expiryDate,
-    );
-    final batchId = await _repository.insertBatch(newBatch);
-    _batches.add(StockBatch(
-      id: batchId,
-      itemId: itemId,
-      purchaseId: purchaseId,
-      purchaseItemId: lineItemId,
-      receivedAt: purchase.purchaseDate,
-      quantity: quantity,
-      remainingQuantity: quantity,
-      unitCost: unitCost,
-      expiryDate: expiryDate,
-    ));
-
-    await _updateItemQuantity(itemId, quantityDelta: quantity);
-    await _inventoryService.recordMovement(
-      itemId: itemId,
-      movementType: 'PURCHASE',
-      quantity: quantity,
-      unitCost: unitCost,
-      movementDate: purchase.purchaseDate,
-      referenceType: 'PURCHASE',
-      referenceId: purchaseId,
-    );
   }
 
   int availableQuantityForItem(int itemId) {
@@ -840,13 +804,17 @@ class PurchaseService {
     await _repository.deletePurchaseEntryItemsByItem(itemId);
     await _repository.deleteBatchesByItem(itemId);
 
-    for (final purchaseId in affectedIds) {
-      await _repository.deletePurchase(purchaseId);
-    }
-
     _purchaseEntryItems.removeWhere((item) => item.itemId == itemId);
     _batches.removeWhere((batch) => batch.itemId == itemId);
-    _purchases.removeWhere((entry) => affectedIds.contains(entry.id));
+
+    for (final purchaseId in affectedIds) {
+      final stillHasItems =
+          _purchaseEntryItems.any((item) => item.purchaseId == purchaseId);
+      if (!stillHasItems) {
+        await _repository.deletePurchase(purchaseId);
+        _purchases.removeWhere((entry) => entry.id == purchaseId);
+      }
+    }
   }
 
   Future<void> _updateItemQuantity(

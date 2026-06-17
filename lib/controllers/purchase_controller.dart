@@ -23,8 +23,12 @@ class PurchaseController extends ChangeNotifier {
   List<PurchaseEntry> get purchases {
     final list = _service.purchases.toList();
     switch (_purchaseFilter) {
+      case PurchaseFilter.draft:
+        return List.unmodifiable(list.where((entry) => entry.isDraft));
       case PurchaseFilter.active:
-        return List.unmodifiable(list.where((entry) => !entry.isCancelled));
+        return List.unmodifiable(
+          list.where((entry) => !entry.isDraft && !entry.isCancelled),
+        );
       case PurchaseFilter.cancelled:
         return List.unmodifiable(list.where((entry) => entry.isCancelled));
       case PurchaseFilter.all:
@@ -47,10 +51,6 @@ class PurchaseController extends ChangeNotifier {
 
   List<PurchaseEntryItem> purchaseEntryItemsForPurchase(int purchaseId) {
     return _service.purchaseEntryItemsForPurchase(purchaseId);
-  }
-
-  PurchaseEntry? findPurchaseByDate(DateTime date) {
-    return _service.findPurchaseByDate(date);
   }
 
   Future<void> addLineItemToPurchase({
@@ -160,6 +160,18 @@ class PurchaseController extends ChangeNotifier {
   bool canCancelPurchase(int purchaseId) =>
       _service.canCancelPurchase(purchaseId);
 
+  Future<void> completePurchase(int id) async {
+    await _service.completePurchase(id);
+    onInventoryChanged?.call();
+    notifyListeners();
+  }
+
+  Future<void> deleteDraftPurchase(int id) async {
+    await _service.deleteDraftPurchase(id);
+    onInventoryChanged?.call();
+    notifyListeners();
+  }
+
   Future<void> cancelPurchase(int id, {String? reason}) async {
     await _service.cancelPurchase(id, reason: reason);
     onInventoryChanged?.call();
@@ -180,6 +192,10 @@ class PurchaseController extends ChangeNotifier {
 
   int availableQuantityForItem(int itemId) {
     return _service.availableQuantityForItem(itemId);
+  }
+
+  int availableQuantityForPurchaseItem(int purchaseItemId) {
+    return _service.availableQuantityForPurchaseItem(purchaseItemId);
   }
 
   List<StockBatch> stockRotationForItem(int itemId) {
@@ -216,4 +232,4 @@ class PurchaseController extends ChangeNotifier {
   }
 }
 
-enum PurchaseFilter { all, active, cancelled }
+enum PurchaseFilter { all, draft, active, cancelled }
