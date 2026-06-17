@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../controllers/inventory_controller.dart';
 import '../models/inventory_item.dart';
 import 'inventory_item_detail_screen.dart';
+import 'inventory_movements_screen.dart';
 
 class InventoryScreen extends StatefulWidget {
   const InventoryScreen({super.key, required this.controller});
@@ -345,6 +346,25 @@ class _InventoryScreenState extends State<InventoryScreen> {
                       ),
                     ),
                   ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => InventoryMovementsScreen(
+                            inventoryController: _controller,
+                          ),
+                        ),
+                      );
+                    },
+                    icon: const Icon(Icons.history),
+                    label: const Text('View All Movements'),
+                  ),
                 ),
               ),
               Padding(

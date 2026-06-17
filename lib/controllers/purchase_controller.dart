@@ -157,8 +157,17 @@ class PurchaseController extends ChangeNotifier {
     notifyListeners();
   }
 
+  bool canCancelPurchase(int purchaseId) =>
+      _service.canCancelPurchase(purchaseId);
+
   Future<void> cancelPurchase(int id, {String? reason}) async {
     await _service.cancelPurchase(id, reason: reason);
+    onInventoryChanged?.call();
+    notifyListeners();
+  }
+
+  Future<void> reactivatePurchase(int id) async {
+    await _service.reactivatePurchase(id);
     onInventoryChanged?.call();
     notifyListeners();
   }

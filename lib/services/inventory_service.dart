@@ -7,6 +7,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../models/inventory.dart';
 import '../models/inventory_item.dart';
+import '../models/inventory_movement.dart';
 import '../repositories/inventory_repository.dart';
 
 class InventoryService {
@@ -15,6 +16,8 @@ class InventoryService {
   final InventoryRepository _repository;
   final Inventory _inventory = Inventory();
   final List<String> _categories = [];
+
+  final List<InventoryMovement> _movements = [];
 
   static const lowStockSettingKey = 'low_stock_threshold';
   static const _inventoryExpiryCleanupKey = 'inventory_expiry_cleanup';
@@ -33,6 +36,48 @@ class InventoryService {
     return _inventory.totalValue;
   }
 
+  List<InventoryMovement> get movements => List.unmodifiable(_movements);
+
+  List<InventoryMovement> movementsForItem(int itemId) {
+    final list = _movements.where((m) => m.itemId == itemId).toList();
+    list.sort((a, b) => b.movementDate.compareTo(a.movementDate));
+    return list;
+  }
+
+  Future<void> recordMovement({
+    required int itemId,
+    required String movementType,
+    required int quantity,
+    required double unitCost,
+    required DateTime movementDate,
+    required String referenceType,
+    required int referenceId,
+  }) async {
+    final movement = InventoryMovement(
+      id: 0,
+      itemId: itemId,
+      batchId: null,
+      movementType: movementType,
+      quantity: quantity,
+      unitCost: unitCost,
+      movementDate: movementDate,
+      referenceType: referenceType,
+      referenceId: referenceId,
+    );
+    final id = await _repository.insertInventoryMovement(movement);
+    _movements.add(InventoryMovement(
+      id: id,
+      itemId: itemId,
+      batchId: null,
+      movementType: movementType,
+      quantity: quantity,
+      unitCost: unitCost,
+      movementDate: movementDate,
+      referenceType: referenceType,
+      referenceId: referenceId,
+    ));
+  }
+
   Future<void> load() async {
     await _repository.init();
     await _runInventoryExpiryCleanup();
@@ -43,6 +88,7 @@ class InventoryService {
 
     final items = await _repository.fetchItems();
     final categories = await _repository.fetchCategories();
+    final movementRows = await _repository.fetchInventoryMovements();
 
     _inventory.items
       ..clear()
@@ -50,6 +96,9 @@ class InventoryService {
     _categories
       ..clear()
       ..addAll(_mergedCategories(categories, items));
+    _movements
+      ..clear()
+      ..addAll(movementRows);
   }
 
   Future<void> setLowStockThreshold(int value) async {

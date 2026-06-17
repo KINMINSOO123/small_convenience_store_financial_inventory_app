@@ -1,5 +1,6 @@
 import '../data/inventory_db.dart';
 import '../models/inventory_item.dart';
+import '../models/inventory_movement.dart';
 
 class InventoryRepository {
   InventoryRepository({InventoryDb? database})
@@ -57,6 +58,25 @@ class InventoryRepository {
 
   Future<void> clearInventoryExpiry() async {
     await _database.clearInventoryExpiry();
+  }
+
+  Future<List<InventoryMovement>> fetchInventoryMovements() async {
+    final rows = await _database.fetchInventoryMovements();
+    return rows.map(InventoryMovement.fromMap).toList();
+  }
+
+  Future<int> insertInventoryMovement(InventoryMovement movement) async {
+    return _database.insertInventoryMovement(movement.toMap());
+  }
+
+  Future<void> deleteInventoryMovementsByReference(
+    String referenceType,
+    int referenceId,
+  ) async {
+    await _database.deleteInventoryMovementsByReference(
+      referenceType,
+      referenceId,
+    );
   }
 
   Future<void> clearAll() async {

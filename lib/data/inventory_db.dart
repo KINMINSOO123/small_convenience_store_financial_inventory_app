@@ -5,7 +5,7 @@ import '../models/inventory_item.dart';
 
 class InventoryDb {
   static const _dbName = 'inventory.db';
-  static const _dbVersion = 18;
+  static const _dbVersion = 19;
   static const _tableItems = 'inventory_items';
   static const _tableCategories = 'inventory_categories';
   static const _tableSettings = 'app_settings';
@@ -17,6 +17,9 @@ class InventoryDb {
   static const _tableJournalLines = 'journal_lines';
   static const _tableSalesEntries = 'sales_entries';
   static const _tableSalesItems = 'sales_entry_items';
+  static const _tableSupplierReturns = 'supplier_returns';
+  static const _tableSupplierReturnItems = 'supplier_return_items';
+  static const _tableInventoryMovements = 'inventory_movements';
 
   Database? _database;
 
@@ -141,6 +144,38 @@ class InventoryDb {
           'sales_date TEXT NOT NULL UNIQUE,'
           'memo TEXT,'
           'amount REAL NOT NULL DEFAULT 0'
+          ')',
+        );
+        await db.execute(
+          'CREATE TABLE $_tableSupplierReturns('
+          'id INTEGER PRIMARY KEY AUTOINCREMENT,'
+          'return_date TEXT NOT NULL,'
+          'purchase_id INTEGER NOT NULL,'
+          'memo TEXT,'
+          'total_amount REAL NOT NULL DEFAULT 0'
+          ')',
+        );
+        await db.execute(
+          'CREATE TABLE $_tableSupplierReturnItems('
+          'id INTEGER PRIMARY KEY AUTOINCREMENT,'
+          'return_id INTEGER NOT NULL,'
+          'item_id INTEGER NOT NULL,'
+          'purchase_item_id INTEGER NOT NULL,'
+          'quantity INTEGER NOT NULL,'
+          'unit_cost REAL NOT NULL'
+          ')',
+        );
+        await db.execute(
+          'CREATE TABLE $_tableInventoryMovements('
+          'id INTEGER PRIMARY KEY AUTOINCREMENT,'
+          'item_id INTEGER NOT NULL,'
+          'batch_id INTEGER,'
+          'movement_type TEXT NOT NULL,'
+          'quantity INTEGER NOT NULL,'
+          'unit_cost REAL NOT NULL,'
+          'movement_date TEXT NOT NULL,'
+          'reference_type TEXT NOT NULL,'
+          'reference_id INTEGER NOT NULL'
           ')',
         );
       },
@@ -546,6 +581,40 @@ class InventoryDb {
             // Column already exists — ignore.
           }
         }
+        if (oldVersion < 19) {
+          await db.execute(
+            'CREATE TABLE $_tableSupplierReturns('
+            'id INTEGER PRIMARY KEY AUTOINCREMENT,'
+            'return_date TEXT NOT NULL,'
+            'purchase_id INTEGER NOT NULL,'
+            'memo TEXT,'
+            'total_amount REAL NOT NULL DEFAULT 0'
+            ')',
+          );
+          await db.execute(
+            'CREATE TABLE $_tableSupplierReturnItems('
+            'id INTEGER PRIMARY KEY AUTOINCREMENT,'
+            'return_id INTEGER NOT NULL,'
+            'item_id INTEGER NOT NULL,'
+            'purchase_item_id INTEGER NOT NULL,'
+            'quantity INTEGER NOT NULL,'
+            'unit_cost REAL NOT NULL'
+            ')',
+          );
+          await db.execute(
+            'CREATE TABLE $_tableInventoryMovements('
+            'id INTEGER PRIMARY KEY AUTOINCREMENT,'
+            'item_id INTEGER NOT NULL,'
+            'batch_id INTEGER,'
+            'movement_type TEXT NOT NULL,'
+            'quantity INTEGER NOT NULL,'
+            'unit_cost REAL NOT NULL,'
+            'movement_date TEXT NOT NULL,'
+            'reference_type TEXT NOT NULL,'
+            'reference_id INTEGER NOT NULL'
+            ')',
+          );
+        }
       },
     );
   }
@@ -794,6 +863,9 @@ class InventoryDb {
     await db.delete(_tablePurchases);
     await db.delete(_tableSalesItems);
     await db.delete(_tableSalesEntries);
+    await db.delete(_tableInventoryMovements);
+    await db.delete(_tableSupplierReturnItems);
+    await db.delete(_tableSupplierReturns);
     await db.delete(_tableJournalLines);
     await db.delete(_tableJournalEntries);
     await db.delete(_tableAccounts);
@@ -941,5 +1013,98 @@ class InventoryDb {
   Future<List<Map<String, Object?>>> fetchJournalLines() async {
     final db = await database;
     return db.query(_tableJournalLines, orderBy: 'entry_id ASC');
+  }
+
+  // --- Supplier Returns ---
+
+  Future<List<Map<String, Object?>>> fetchSupplierReturns() async {
+    final db = await database;
+    return db.query(_tableSupplierReturns, orderBy: 'return_date DESC');
+  }
+
+  Future<int> insertSupplierReturn(Map<String, Object?> values) async {
+    final db = await database;
+    return db.insert(_tableSupplierReturns, values);
+  }
+
+  Future<void> updateSupplierReturn(Map<String, Object?> values, int id) async {
+    final db = await database;
+    await db.update(
+      _tableSupplierReturns,
+      values,
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  Future<void> deleteSupplierReturn(int id) async {
+    final db = await database;
+    await db.delete(_tableSupplierReturns, where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<List<Map<String, Object?>>> fetchSupplierReturnsByPurchase(
+    int purchaseId,
+  ) async {
+    final db = await database;
+    return db.query(
+      _tableSupplierReturns,
+      where: 'purchase_id = ?',
+      whereArgs: [purchaseId],
+      orderBy: 'return_date DESC',
+    );
+  }
+
+  // --- Supplier Return Items ---
+
+  Future<List<Map<String, Object?>>> fetchSupplierReturnItems() async {
+    final db = await database;
+    return db.query(_tableSupplierReturnItems, orderBy: 'id ASC');
+  }
+
+  Future<int> insertSupplierReturnItem(Map<String, Object?> values) async {
+    final db = await database;
+    return db.insert(_tableSupplierReturnItems, values);
+  }
+
+  Future<void> deleteSupplierReturnItemsByReturn(int returnId) async {
+    final db = await database;
+    await db.delete(
+      _tableSupplierReturnItems,
+      where: 'return_id = ?',
+      whereArgs: [returnId],
+    );
+  }
+
+  Future<void> deleteSupplierReturnItem(int id) async {
+    final db = await database;
+    await db.delete(
+      _tableSupplierReturnItems,
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  // --- Inventory Movements ---
+
+  Future<List<Map<String, Object?>>> fetchInventoryMovements() async {
+    final db = await database;
+    return db.query(_tableInventoryMovements, orderBy: 'movement_date DESC');
+  }
+
+  Future<int> insertInventoryMovement(Map<String, Object?> values) async {
+    final db = await database;
+    return db.insert(_tableInventoryMovements, values);
+  }
+
+  Future<void> deleteInventoryMovementsByReference(
+    String referenceType,
+    int referenceId,
+  ) async {
+    final db = await database;
+    await db.delete(
+      _tableInventoryMovements,
+      where: 'reference_type = ? AND reference_id = ?',
+      whereArgs: [referenceType, referenceId],
+    );
   }
 }

@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../controllers/inventory_controller.dart';
 import '../controllers/purchase_controller.dart';
+import '../controllers/supplier_return_controller.dart';
 import '../models/purchase_entry.dart';
+import '../services/supplier_return_service.dart';
 
 class PurchaseEntryDetailScreen extends StatefulWidget {
   const PurchaseEntryDetailScreen({
@@ -10,11 +12,13 @@ class PurchaseEntryDetailScreen extends StatefulWidget {
     required this.purchase,
     required this.controller,
     required this.inventoryController,
+    required this.supplierReturnController,
   });
 
   final PurchaseEntry purchase;
   final PurchaseController controller;
   final InventoryController inventoryController;
+  final SupplierReturnController supplierReturnController;
 
   @override
   State<PurchaseEntryDetailScreen> createState() =>
@@ -25,6 +29,8 @@ class _PurchaseEntryDetailScreenState
     extends State<PurchaseEntryDetailScreen> {
   PurchaseController get _controller => widget.controller;
   InventoryController get _inventoryController => widget.inventoryController;
+  SupplierReturnController get _returnController =>
+      widget.supplierReturnController;
 
   String _formatDate(DateTime date) {
     final y = date.year.toString().padLeft(4, '0');
@@ -391,6 +397,310 @@ class _PurchaseEntryDetailScreenState
     );
   }
 
+  Widget _buildReturnsSection(
+    BuildContext context,
+    ThemeData theme,
+    int purchaseId,
+  ) {
+    final returns = _returnController.returnsForPurchase(purchaseId);
+    if (returns.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Returns (${returns.length})',
+          style: theme.textTheme.titleMedium,
+        ),
+        const SizedBox(height: 8),
+        ...returns.map((r) {
+          final total = r.totalAmount;
+          return Card(
+            child: ListTile(
+              leading: CircleAvatar(
+                backgroundColor: theme.colorScheme.errorContainer,
+                child: const Icon(Icons.replay_outlined),
+              ),
+              title: Text(_formatDate(r.returnDate)),
+              subtitle: r.memo != null && r.memo!.isNotEmpty
+                  ? Text(r.memo!)
+                  : null,
+              trailing: Text(
+                '-\$${total.toStringAsFixed(2)}',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              onTap: () => _showReturnDetailDialog(context, r.id),
+            ),
+          );
+        }),
+      ],
+    );
+  }
+
+  Future<void> _showReturnDialog(
+    BuildContext context,
+    int purchaseId,
+  ) async {
+    final items =
+        _controller.purchaseEntryItemsForPurchase(purchaseId);
+    if (items.isEmpty) return;
+
+    final returnDateNotifier = ValueNotifier<DateTime>(DateTime.now());
+    final memoController = TextEditingController();
+    final quantityControllers = <int, TextEditingController>{};
+    for (final item in items) {
+      quantityControllers[item.id] = TextEditingController(text: '0');
+    }
+
+    final submitted = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text('Return to Supplier'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    ValueListenableBuilder<DateTime>(
+                      valueListenable: returnDateNotifier,
+                      builder: (context, date, _) {
+                        return Row(
+                          children: [
+                            Text('Return date: ${_formatDate(date)}'),
+                            const SizedBox(width: 12),
+                            TextButton(
+                              onPressed: () async {
+                                final picked = await showDatePicker(
+                                  context: context,
+                                  initialDate: date,
+                                  firstDate: DateTime(2000),
+                                  lastDate: DateTime(2100),
+                                );
+                                if (picked != null) {
+                                  returnDateNotifier.value = picked;
+                                }
+                              },
+                              child: const Text('Pick date'),
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: memoController,
+                      decoration: const InputDecoration(
+                        labelText: 'Memo (optional)',
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    ...items.map((item) {
+                      final invItem =
+                          _inventoryController.getItemById(item.itemId);
+                      final name = invItem?.name ?? 'Item #${item.itemId}';
+                      final available = _controller
+                          .availableQuantityForItem(item.itemId);
+                      final ctrl = quantityControllers[item.id]!;
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '$name  (Purchased: ${item.quantity}, '
+                              'Available: $available)',
+                              style: Theme.of(context).textTheme.bodyMedium,
+                            ),
+                            const SizedBox(height: 4),
+                            TextField(
+                              controller: ctrl,
+                              decoration: const InputDecoration(
+                                labelText: 'Return qty',
+                                isDense: true,
+                              ),
+                              keyboardType: TextInputType.number,
+                            ),
+                          ],
+                        ),
+                      );
+                    }),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () =>
+                      Navigator.of(context).pop(false),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () =>
+                      Navigator.of(context).pop(true),
+                  child: const Text('Return'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (submitted != true) return;
+
+    final drafts = <SupplierReturnItemDraft>[];
+    for (final item in items) {
+      final ctrl = quantityControllers[item.id]!;
+      final qty = int.tryParse(ctrl.text.trim());
+      if (qty == null || qty <= 0) continue;
+      if (qty > _controller.availableQuantityForItem(item.itemId)) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Not enough stock for '
+              '${_inventoryController.getItemById(item.itemId)?.name ?? 'item'}.',
+            ),
+          ),
+        );
+        return;
+      }
+      drafts.add(SupplierReturnItemDraft(
+        purchaseItemId: item.id,
+        itemId: item.itemId,
+        quantity: qty,
+      ));
+    }
+
+    if (drafts.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Enter at least one item to return.'),
+        ),
+      );
+      return;
+    }
+
+    try {
+      await _returnController.createReturn(
+        purchaseId: purchaseId,
+        returnDate: returnDateNotifier.value,
+        memo: memoController.text.trim().isEmpty
+            ? null
+            : memoController.text.trim(),
+        items: drafts,
+      );
+    } on StateError catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.message)),
+      );
+    }
+  }
+
+  Future<void> _showReturnDetailDialog(
+    BuildContext context,
+    int returnId,
+  ) async {
+    final returnEntry =
+        _returnController.returns.firstWhere((r) => r.id == returnId);
+    final items =
+        _returnController.returnItemsForReturn(returnId);
+
+    await showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              title: const Text('Return Details'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Date: ${_formatDate(returnEntry.returnDate)}'),
+                    if (returnEntry.memo != null &&
+                        returnEntry.memo!.isNotEmpty)
+                      Text('Memo: ${returnEntry.memo}'),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Total: -\$${returnEntry.totalAmount.toStringAsFixed(2)}',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    ...items.map((item) {
+                      final invItem =
+                          _inventoryController.getItemById(item.itemId);
+                      final name = invItem?.name ?? 'Item #${item.itemId}';
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 4),
+                        child: Text(
+                          '$name  ${item.quantity} × '
+                          '\$${item.unitCost.toStringAsFixed(2)} = '
+                          '\$${item.subtotal.toStringAsFixed(2)}',
+                        ),
+                      );
+                    }),
+                    const SizedBox(height: 16),
+                    FilledButton.icon(
+                      onPressed: () async {
+                        final confirmed =
+                            await _confirmDeleteReturn(context);
+                        if (confirmed != true) return;
+                        await _returnController.deleteReturn(returnId);
+                        if (context.mounted) {
+                          Navigator.of(context).pop();
+                        }
+                      },
+                      icon: const Icon(Icons.delete_outline),
+                      label: const Text('Delete return'),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Close'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<bool?> _confirmDeleteReturn(BuildContext context) async {
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete return'),
+        content: const Text(
+          'This will reverse the stock effect of the return. Continue?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -415,7 +725,7 @@ class _PurchaseEntryDetailScreenState
               label: const Text('Add item'),
             ),
       body: AnimatedBuilder(
-        animation: _controller,
+        animation: Listenable.merge([_controller, _returnController]),
         builder: (context, _) {
           final purchase = _controller.allPurchases
               .firstWhere((p) => p.id == widget.purchase.id);
@@ -555,23 +865,63 @@ class _PurchaseEntryDetailScreenState
                           ),
                         );
                     }),
+              const SizedBox(height: 16),
+              _buildReturnsSection(context, theme, purchase.id),
               const SizedBox(height: 24),
               if (!purchase.isCancelled)
                 Row(
                   children: [
                     Expanded(
+                      child: Tooltip(
+                        message: !_controller.canCancelPurchase(purchase.id)
+                            ? 'Cannot cancel — stock has been consumed. '
+                                'Use Return to Supplier.'
+                            : '',
+                        child: OutlinedButton.icon(
+                          onPressed: !_controller
+                                  .canCancelPurchase(purchase.id)
+                              ? null
+                              : () async {
+                                  final reason =
+                                      await _promptCancelReason(context);
+                                  if (reason == null) return;
+                                  await _controller.cancelPurchase(
+                                    purchase.id,
+                                    reason: reason,
+                                  );
+                                  if (context.mounted) {
+                                    Navigator.of(context).pop();
+                                  }
+                                },
+                          icon: const Icon(Icons.cancel_outlined),
+                          label: const Text('Cancel purchase'),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        onPressed: () =>
+                            _showReturnDialog(context, purchase.id),
+                        icon: const Icon(Icons.replay_outlined),
+                        label: const Text('Return to supplier'),
+                      ),
+                    ),
+                  ],
+                )
+              else
+                Row(
+                  children: [
+                    Expanded(
                       child: OutlinedButton.icon(
                         onPressed: () async {
-                          final reason = await _promptCancelReason(context);
-                          if (reason == null) return;
-                          await _controller.cancelPurchase(
-                            purchase.id,
-                            reason: reason,
-                          );
-                          if (context.mounted) Navigator.of(context).pop();
+                          final confirmed =
+                              await _confirmReactivatePurchase(context);
+                          if (confirmed != true) return;
+                          await _controller.reactivatePurchase(purchase.id);
                         },
-                        icon: const Icon(Icons.cancel_outlined),
-                        label: const Text('Cancel purchase'),
+                        icon: const Icon(Icons.refresh_outlined),
+                        label: const Text('Reactivate'),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -638,6 +988,29 @@ class _PurchaseEntryDetailScreenState
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
             child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<bool?> _confirmReactivatePurchase(BuildContext context) async {
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Reactivate purchase'),
+        content: const Text(
+          'This will restore the purchase to active status '
+          'and add its stock back to inventory. Continue?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Reactivate'),
           ),
         ],
       ),

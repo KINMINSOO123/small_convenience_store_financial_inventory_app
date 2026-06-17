@@ -120,6 +120,15 @@ class SalesService {
         costOfGoodsSold: cogs,
       ),
     );
+    await _inventoryService.recordMovement(
+      itemId: itemId,
+      movementType: 'SALE',
+      quantity: -quantity,
+      unitCost: cogs / quantity,
+      movementDate: normalizedDate,
+      referenceType: 'SALE',
+      referenceId: entryId,
+    );
     _sortEntries();
   }
 
@@ -144,6 +153,15 @@ class SalesService {
       await _purchaseService.restockFromSale(
         itemId: item.itemId,
         quantity: item.quantity,
+      );
+      await _inventoryService.recordMovement(
+        itemId: item.itemId,
+        movementType: 'SALE',
+        quantity: item.quantity,
+        unitCost: item.costOfGoodsSold / item.quantity,
+        movementDate: _normalizeDate(salesDate),
+        referenceType: 'SALE',
+        referenceId: id,
       );
     }
 
@@ -187,6 +205,15 @@ class SalesService {
           unitPrice: item.sellingPrice,
           costOfGoodsSold: cogs,
         ),
+      );
+      await _inventoryService.recordMovement(
+        itemId: itemId,
+        movementType: 'SALE',
+        quantity: -quantity,
+        unitCost: cogs / quantity,
+        movementDate: _normalizeDate(salesDate),
+        referenceType: 'SALE',
+        referenceId: id,
       );
       _sortEntries();
     } catch (error) {
@@ -260,6 +287,15 @@ class SalesService {
         unitPrice: item.sellingPrice,
         costOfGoodsSold: cogs,
       ),
+    );
+    await _inventoryService.recordMovement(
+      itemId: itemId,
+      movementType: 'SALE',
+      quantity: -quantity,
+      unitCost: cogs / quantity,
+      movementDate: DateTime.now(),
+      referenceType: 'SALE',
+      referenceId: saleId,
     );
 
     final index = _entries.indexWhere((e) => e.id == saleId);

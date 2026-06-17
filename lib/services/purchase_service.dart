@@ -148,6 +148,15 @@ class PurchaseService {
     _batches.add(storedBatch);
 
     await _updateItemQuantity(itemId, quantityDelta: quantity);
+    await _inventoryService.recordMovement(
+      itemId: itemId,
+      movementType: 'PURCHASE',
+      quantity: quantity,
+      unitCost: unitCost,
+      movementDate: normalizedDate,
+      referenceType: 'PURCHASE',
+      referenceId: purchaseId,
+    );
     return purchaseId;
   }
 
@@ -190,6 +199,15 @@ class PurchaseService {
       await _updateItemQuantity(
         oldItem.itemId,
         quantityDelta: -oldItem.quantity,
+      );
+      await _inventoryService.recordMovement(
+        itemId: oldItem.itemId,
+        movementType: 'CANCEL_PURCHASE',
+        quantity: -oldItem.quantity,
+        unitCost: oldItem.unitCost,
+        movementDate: purchaseDate,
+        referenceType: 'PURCHASE',
+        referenceId: existing.id,
       );
     }
 
@@ -240,6 +258,15 @@ class PurchaseService {
     );
 
     await _updateItemQuantity(itemId, quantityDelta: quantity);
+    await _inventoryService.recordMovement(
+      itemId: itemId,
+      movementType: 'PURCHASE',
+      quantity: quantity,
+      unitCost: unitCost,
+      movementDate: purchaseDate,
+      referenceType: 'PURCHASE',
+      referenceId: existing.id,
+    );
 
     final index = _purchases.indexWhere((entry) => entry.id == existing.id);
     if (index != -1) {
@@ -253,6 +280,13 @@ class PurchaseService {
     }
   }
 
+  bool canCancelPurchase(int purchaseId) {
+    final purchaseBatches =
+        _batches.where((b) => b.purchaseId == purchaseId).toList();
+    return purchaseBatches.isNotEmpty &&
+        purchaseBatches.every((b) => b.remainingQuantity == b.quantity);
+  }
+
   Future<void> cancelPurchase(int id, {String? reason}) async {
     final index = _purchases.indexWhere((entry) => entry.id == id);
     if (index == -1) {
@@ -261,6 +295,17 @@ class PurchaseService {
     final purchase = _purchases[index];
     if (purchase.isCancelled) {
       return;
+    }
+
+    final purchaseBatches =
+        _batches.where((b) => b.purchaseId == purchase.id).toList();
+    final anyConsumed =
+        purchaseBatches.any((b) => b.remainingQuantity != b.quantity);
+    if (anyConsumed) {
+      throw StateError(
+        'Cannot cancel — some stock from this purchase has been consumed. '
+        'Use "Return to Supplier" instead.',
+      );
     }
 
     await _repository.updatePurchase(
@@ -284,6 +329,15 @@ class PurchaseService {
         lineItem.itemId,
         quantityDelta: -lineItem.quantity,
       );
+      await _inventoryService.recordMovement(
+        itemId: lineItem.itemId,
+        movementType: 'CANCEL_PURCHASE',
+        quantity: -lineItem.quantity,
+        unitCost: lineItem.unitCost,
+        movementDate: purchase.purchaseDate,
+        referenceType: 'PURCHASE',
+        referenceId: id,
+      );
     }
 
     _purchases[index] = PurchaseEntry(
@@ -292,6 +346,65 @@ class PurchaseService {
       memo: purchase.memo,
       status: 'CANCELLED',
       cancelReason: reason,
+    );
+  }
+
+  Future<void> reactivatePurchase(int id) async {
+    final index = _purchases.indexWhere((entry) => entry.id == id);
+    if (index == -1) return;
+    final purchase = _purchases[index];
+    if (!purchase.isCancelled) return;
+
+    final lineItems =
+        _purchaseEntryItems.where((i) => i.purchaseId == id).toList();
+
+    await _repository.updatePurchase(
+      PurchaseEntry(
+        id: purchase.id,
+        purchaseDate: purchase.purchaseDate,
+        memo: purchase.memo,
+        status: 'ACTIVE',
+        cancelReason: null,
+      ),
+    );
+
+    for (final lineItem in lineItems) {
+      final batch = StockBatch(
+        id: 0,
+        itemId: lineItem.itemId,
+        purchaseId: purchase.id,
+        purchaseItemId: lineItem.id,
+        receivedAt: purchase.purchaseDate,
+        quantity: lineItem.quantity,
+        remainingQuantity: lineItem.quantity,
+        unitCost: lineItem.unitCost,
+        expiryDate: lineItem.expiryDate,
+      );
+      final batchId = await _repository.insertBatch(batch);
+      _batches.add(StockBatch(
+        id: batchId,
+        itemId: lineItem.itemId,
+        purchaseId: purchase.id,
+        purchaseItemId: lineItem.id,
+        receivedAt: purchase.purchaseDate,
+        quantity: lineItem.quantity,
+        remainingQuantity: lineItem.quantity,
+        unitCost: lineItem.unitCost,
+        expiryDate: lineItem.expiryDate,
+      ));
+
+      await _updateItemQuantity(
+        lineItem.itemId,
+        quantityDelta: lineItem.quantity,
+      );
+    }
+
+    _purchases[index] = PurchaseEntry(
+      id: purchase.id,
+      purchaseDate: purchase.purchaseDate,
+      memo: purchase.memo,
+      status: 'ACTIVE',
+      cancelReason: null,
     );
   }
 
@@ -319,6 +432,15 @@ class PurchaseService {
         await _updateItemQuantity(
           lineItem.itemId,
           quantityDelta: -lineItem.quantity,
+        );
+        await _inventoryService.recordMovement(
+          itemId: lineItem.itemId,
+          movementType: 'CANCEL_PURCHASE',
+          quantity: -lineItem.quantity,
+          unitCost: lineItem.unitCost,
+          movementDate: purchase.purchaseDate,
+          referenceType: 'PURCHASE',
+          referenceId: id,
         );
       }
     }
@@ -403,6 +525,12 @@ class PurchaseService {
   }
 
   double totalForPurchase(int purchaseId) {
+    try {
+      final purchase = _purchases.firstWhere((p) => p.id == purchaseId);
+      if (purchase.isCancelled) return 0;
+    } catch (_) {
+      return 0;
+    }
     return _purchaseEntryItems
         .where((item) => item.purchaseId == purchaseId)
         .fold(0.0, (sum, item) => sum + item.subtotal);
@@ -472,6 +600,15 @@ class PurchaseService {
     ));
 
     await _updateItemQuantity(itemId, quantityDelta: quantity);
+    await _inventoryService.recordMovement(
+      itemId: itemId,
+      movementType: 'PURCHASE',
+      quantity: quantity,
+      unitCost: unitCost,
+      movementDate: purchase.purchaseDate,
+      referenceType: 'PURCHASE',
+      referenceId: purchaseId,
+    );
   }
 
   Future<void> updatePurchaseEntryMemo(int purchaseId, String? memo) async {
@@ -503,6 +640,15 @@ class PurchaseService {
     await _updateItemQuantity(
       lineItem.itemId,
       quantityDelta: -lineItem.quantity,
+    );
+    await _inventoryService.recordMovement(
+      itemId: lineItem.itemId,
+      movementType: 'CANCEL_PURCHASE',
+      quantity: -lineItem.quantity,
+      unitCost: lineItem.unitCost,
+      movementDate: purchase.purchaseDate,
+      referenceType: 'PURCHASE',
+      referenceId: purchaseId,
     );
 
     final batchIndex = _batches.indexWhere(
@@ -540,6 +686,15 @@ class PurchaseService {
     await _updateItemQuantity(
       oldItem.itemId,
       quantityDelta: -oldItem.quantity,
+    );
+    await _inventoryService.recordMovement(
+      itemId: oldItem.itemId,
+      movementType: 'CANCEL_PURCHASE',
+      quantity: -oldItem.quantity,
+      unitCost: oldItem.unitCost,
+      movementDate: purchase.purchaseDate,
+      referenceType: 'PURCHASE',
+      referenceId: purchaseId,
     );
 
     final oldBatchIndex = _batches.indexWhere(
@@ -586,6 +741,15 @@ class PurchaseService {
     ));
 
     await _updateItemQuantity(itemId, quantityDelta: quantity);
+    await _inventoryService.recordMovement(
+      itemId: itemId,
+      movementType: 'PURCHASE',
+      quantity: quantity,
+      unitCost: unitCost,
+      movementDate: purchase.purchaseDate,
+      referenceType: 'PURCHASE',
+      referenceId: purchaseId,
+    );
   }
 
   int availableQuantityForItem(int itemId) {

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../controllers/inventory_controller.dart';
 import '../controllers/purchase_controller.dart';
+import '../controllers/supplier_return_controller.dart';
 import 'purchase_entry_detail_screen.dart';
 
 class PurchasesScreen extends StatefulWidget {
@@ -9,10 +10,12 @@ class PurchasesScreen extends StatefulWidget {
     super.key,
     required this.controller,
     required this.inventoryController,
+    required this.supplierReturnController,
   });
 
   final PurchaseController controller;
   final InventoryController inventoryController;
+  final SupplierReturnController supplierReturnController;
 
   @override
   State<PurchasesScreen> createState() => _PurchasesScreenState();
@@ -607,6 +610,8 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
                                       controller: _controller,
                                       inventoryController:
                                           _inventoryController,
+                                      supplierReturnController:
+                                          widget.supplierReturnController,
                                     ),
                                   ),
                                 );

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../controllers/inventory_controller.dart';
 import '../models/inventory_item.dart';
 import '../models/stock_batch.dart';
+import 'inventory_movements_screen.dart';
 
 class InventoryItemDetailScreen extends StatelessWidget {
   const InventoryItemDetailScreen({
@@ -58,156 +59,148 @@ class InventoryItemDetailScreen extends StatelessWidget {
           final totalValue = controller.stockValueForItem(item.id);
           final theme = Theme.of(context);
 
-          return Column(
+          return ListView(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
             children: [
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(
-                              child: Text(
-                                item.name,
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: Text(
+                              item.name,
+                              style: theme.textTheme.titleLarge,
+                            ),
+                          ),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Text(
+                                'Stock Value',
+                                style: theme.textTheme.labelMedium,
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                totalValue.toStringAsFixed(2),
                                 style: theme.textTheme.titleLarge,
                               ),
-                            ),
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              children: [
-                                Text(
-                                  'Stock Value',
-                                  style: theme.textTheme.labelMedium,
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  totalValue.toStringAsFixed(2),
-                                  style: theme.textTheme.titleLarge,
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 8),
-                        _Pill(label: item.category),
-                        const SizedBox(height: 12),
-                        Row(
-                          children: [
-                            Text(
-                              '${item.quantity} units',
-                              style: theme.textTheme.bodyMedium,
-                            ),
-                            const Spacer(),
-                            Text(
-                              '${item.sellingPrice.toStringAsFixed(2)}/unit',
-                              style: theme.textTheme.bodySmall,
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
+                            ],
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      _Pill(label: item.category),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Text(
+                            '${item.quantity} units',
+                            style: theme.textTheme.bodyMedium,
+                          ),
+                          const Spacer(),
+                          Text(
+                            '${item.sellingPrice.toStringAsFixed(2)}/unit',
+                            style: theme.textTheme.bodySmall,
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
                 ),
               ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Row(
-                  children: [
-                    Text(
-                      'Stock Batches (FEFO/FIFO)',
-                      style: theme.textTheme.titleMedium,
-                    ),
-                    const Spacer(),
-                    Text(
-                      '${batches.length} batches',
-                      style: theme.textTheme.bodySmall,
-                    ),
-                  ],
-                ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Text(
+                    'Stock Batches (FEFO/FIFO)',
+                    style: theme.textTheme.titleMedium,
+                  ),
+                  const Spacer(),
+                  Text(
+                    '${batches.length} batches',
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ],
               ),
               const SizedBox(height: 8),
-              Expanded(
-                child: batches.isEmpty
-                    ? const Center(
-                        child: Text('No stock available for this item.'))
-                    : ListView.separated(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        itemCount: batches.length,
-                        separatorBuilder: (_, __) =>
-                            const Divider(height: 1),
-                        itemBuilder: (context, index) {
-                          final batch = batches[index];
-                          return Padding(
-                            padding:
-                                const EdgeInsets.symmetric(vertical: 8),
-                            child: Row(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                CircleAvatar(
-                                  backgroundColor:
-                                      theme.colorScheme.primaryContainer,
-                                  child: Text('${index + 1}'),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        index == 0
-                                            ? 'Sell first'
-                                            : 'Sell next',
-                                        style:
-                                            theme.textTheme.titleSmall,
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Wrap(
-                                        spacing: 8,
-                                        runSpacing: 4,
-                                        children: [
-                                          _Pill(
-                                            label:
-                                                '${batch.remainingQuantity} units',
-                                          ),
-                                          _Pill(
-                                            label:
-                                                'Unit cost ${batch.unitCost.toStringAsFixed(2)}',
-                                          ),
-                                        ],
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        _expiryLabel(batch),
-                                        style:
-                                            theme.textTheme.bodySmall,
-                                      ),
-                                      Text(
-                                        'Purchased ${_formatDate(batch.receivedAt)}',
-                                        style:
-                                            theme.textTheme.bodySmall,
-                                      ),
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        'Value: ${(batch.remainingQuantity * batch.unitCost).toStringAsFixed(2)}',
-                                        style: theme.textTheme.bodyMedium
-                                            ?.copyWith(
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                    ],
+              if (batches.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 16),
+                  child: Center(child: Text('No stock available for this item.')),
+                )
+              else
+                ...batches.map((batch) {
+                  final index = batches.indexOf(batch);
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        CircleAvatar(
+                          backgroundColor: theme.colorScheme.primaryContainer,
+                          child: Text('${index + 1}'),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                index == 0 ? 'Sell first' : 'Sell next',
+                                style: theme.textTheme.titleSmall,
+                              ),
+                              const SizedBox(height: 4),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 4,
+                                children: [
+                                  _Pill(label: '${batch.remainingQuantity} units'),
+                                  _Pill(
+                                    label:
+                                        'Unit cost ${batch.unitCost.toStringAsFixed(2)}',
                                   ),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              Text(_expiryLabel(batch),
+                                  style: theme.textTheme.bodySmall),
+                              Text('Purchased ${_formatDate(batch.receivedAt)}',
+                                  style: theme.textTheme.bodySmall),
+                              const SizedBox(height: 4),
+                              Text(
+                                'Value: ${(batch.remainingQuantity * batch.unitCost).toStringAsFixed(2)}',
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  fontWeight: FontWeight.w600,
                                 ),
-                              ],
-                            ),
-                          );
-                        },
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }),
+              const SizedBox(height: 16),
+              Center(
+                child: TextButton.icon(
+                  onPressed: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => InventoryMovementsScreen(
+                          inventoryController: controller,
+                          itemId: item.id,
+                        ),
                       ),
+                    );
+                  },
+                  icon: const Icon(Icons.history),
+                  label: const Text('View Movements'),
+                ),
               ),
             ],
           );

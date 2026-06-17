@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../models/inventory_item.dart';
+import '../models/inventory_movement.dart';
 import '../models/stock_batch.dart';
 import '../services/inventory_service.dart';
 import 'purchase_controller.dart';
@@ -142,6 +143,12 @@ class InventoryController extends ChangeNotifier {
 
   List<StockBatch> stockRotationForItem(int itemId) {
     return _purchaseController?.stockRotationForItem(itemId) ?? [];
+  }
+
+  List<InventoryMovement> get movements => _service.movements;
+
+  List<InventoryMovement> movementsForItem(int itemId) {
+    return _service.movementsForItem(itemId);
   }
 
   bool isItemExpiringSoon(int itemId) {

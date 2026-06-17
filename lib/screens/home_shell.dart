@@ -4,15 +4,18 @@ import '../controllers/expenses_controller.dart';
 import '../controllers/inventory_controller.dart';
 import '../controllers/purchase_controller.dart';
 import '../controllers/sales_controller.dart';
+import '../controllers/supplier_return_controller.dart';
 import '../data/inventory_db.dart';
 import '../repositories/expenses_repository.dart';
 import '../repositories/inventory_repository.dart';
 import '../repositories/purchase_repository.dart';
 import '../repositories/sales_repository.dart';
+import '../repositories/supplier_return_repository.dart';
 import '../services/expenses_service.dart';
 import '../services/inventory_service.dart';
 import '../services/purchase_service.dart';
 import '../services/sales_service.dart';
+import '../services/supplier_return_service.dart';
 import 'expenses_screen.dart';
 import 'inventory_screen.dart';
 import 'purchases_screen.dart';
@@ -41,6 +44,23 @@ class _HomeShellState extends State<HomeShell> {
       InventoryService(_inventoryRepository);
   late final PurchaseService _purchaseService =
       PurchaseService(_purchaseRepository, _inventoryService);
+  late final SupplierReturnRepository _supplierReturnRepository =
+      SupplierReturnRepository(database: _database);
+  late final SupplierReturnService _supplierReturnService =
+      SupplierReturnService(
+        _supplierReturnRepository,
+        _purchaseService,
+        _inventoryService,
+        _inventoryRepository,
+      );
+  late final SupplierReturnController _supplierReturnController =
+      SupplierReturnController(
+        supplierReturnService: _supplierReturnService,
+        onInventoryChanged: () {
+          _inventoryController.notifyListeners();
+          _purchaseController.notifyListeners();
+        },
+      );
   late final InventoryController _inventoryController =
       InventoryController(
         inventoryService: _inventoryService,
@@ -81,6 +101,7 @@ class _HomeShellState extends State<HomeShell> {
     _purchaseController.dispose();
     _expensesController.dispose();
     _salesController.dispose();
+    _supplierReturnController.dispose();
     super.dispose();
   }
 
@@ -90,6 +111,7 @@ class _HomeShellState extends State<HomeShell> {
       _purchaseController.loadData(),
       _expensesController.loadData(),
       _salesController.loadData(),
+      _supplierReturnController.loadData(),
     ]);
   }
 
@@ -98,6 +120,7 @@ class _HomeShellState extends State<HomeShell> {
         PurchasesScreen(
           controller: _purchaseController,
           inventoryController: _inventoryController,
+          supplierReturnController: _supplierReturnController,
         ),
         SalesScreen(
           controller: _salesController,
