@@ -6,6 +6,9 @@ import '../models/purchase_entry.dart';
 import '../models/purchase_entry_item.dart';
 import '../models/sales_entry.dart';
 import '../models/sales_entry_item.dart';
+import '../models/stock_batch.dart';
+import '../models/supplier_return.dart';
+import '../models/supplier_return_item.dart';
 
 class ReportingService {
   ReportData buildReport({
@@ -20,11 +23,13 @@ class ReportingService {
     required List<SalesEntry> sales,
     required List<SalesEntryItem> salesEntryItems,
     required double inventoryValue,
-    required int lowStockCount,
-    required int expiringSoonCount,
+    required List<StockBatch> batches,
+    required List<InventoryItem> lowStockItems,
+    List<SupplierReturn> supplierReturns = const [],
+    List<SupplierReturnItem> supplierReturnItems = const [],
   }) {
     final purchasesInRange = purchases
-        .where((purchase) => !purchase.isCancelled)
+        .where((purchase) => !purchase.isCancelled && !purchase.isDraft)
         .where((purchase) => _isWithin(purchase.purchaseDate, start, end))
         .toList();
 
@@ -32,21 +37,47 @@ class ReportingService {
         .where((entry) => _isWithin(entry.date, start, end))
         .toList();
 
-    final salesInRange =
-      sales.where((entry) => _isWithin(entry.salesDate, start, end)).toList();
+    final salesInRange = sales
+        .where((entry) => !entry.isDraft && !entry.isVoid)
+        .where((entry) => _isWithin(entry.salesDate, start, end))
+        .toList();
 
     final purchaseIdsInRange = purchasesInRange.map((p) => p.id).toSet();
 
     final itemNames = {
       for (final item in items) item.id: item.name,
     };
+
+    final salesTotals = <String, ReportLine>{};
+    for (final sale in salesInRange) {
+      final saleItems = salesEntryItems.where((i) => i.salesId == sale.id);
+      for (final lineItem in saleItems) {
+        final label =
+            itemNames[lineItem.itemId] ?? 'Item #${lineItem.itemId}';
+        salesTotals.update(
+          label,
+          (line) => line.copyWith(
+            quantity: line.quantity + lineItem.quantity,
+            total: line.total + lineItem.subtotal,
+          ),
+          ifAbsent: () => ReportLine(
+            label: label,
+            quantity: lineItem.quantity,
+            total: lineItem.subtotal,
+          ),
+        );
+      }
+    }
+
     final purchaseTotals = <String, ReportLine>{};
+    final purchaseItemLabel = <int, String>{};
     for (final purchase in purchasesInRange) {
       final itemsForPurchase =
           purchaseEntryItems.where((i) => i.purchaseId == purchase.id);
       for (final lineItem in itemsForPurchase) {
         final label =
             itemNames[lineItem.itemId] ?? 'Item #${lineItem.itemId}';
+        purchaseItemLabel[lineItem.id] = label;
         final total = lineItem.quantity * lineItem.unitCost;
         purchaseTotals.update(
           label,
@@ -62,6 +93,31 @@ class ReportingService {
         );
       }
     }
+
+    // Subtract supplier returns from purchase totals
+    final returnIdsInRange = supplierReturns
+        .where((r) => purchaseIdsInRange.contains(r.purchaseId))
+        .map((r) => r.id)
+        .toSet();
+    for (final returnItem
+        in supplierReturnItems.where((i) => returnIdsInRange.contains(i.returnId))) {
+      final label =
+          purchaseItemLabel[returnItem.purchaseItemId] ?? 'Unknown';
+      final returnTotal = returnItem.quantity * returnItem.unitCost;
+      purchaseTotals.update(
+        label,
+        (line) => line.copyWith(
+          quantity: line.quantity - returnItem.quantity,
+          total: line.total - returnTotal,
+        ),
+        ifAbsent: () => ReportLine(
+          label: label,
+          quantity: -returnItem.quantity,
+          total: -returnTotal,
+        ),
+      );
+    }
+    purchaseTotals.removeWhere((_, line) => line.quantity <= 0);
 
     final expenseTotals = <String, ReportLine>{};
     final expenseCategoryByEntryId =
@@ -82,6 +138,8 @@ class ReportingService {
       );
     }
 
+    final salesLines = salesTotals.values.toList()
+      ..sort((a, b) => b.total.compareTo(a.total));
     final purchaseLines = purchaseTotals.values.toList()
       ..sort((a, b) => b.total.compareTo(a.total));
     final expenseLines = expenseTotals.values.toList()
@@ -89,7 +147,10 @@ class ReportingService {
 
     final purchasesTotal = purchaseEntryItems
         .where((item) => purchaseIdsInRange.contains(item.purchaseId))
-        .fold<double>(0, (sum, item) => sum + (item.quantity * item.unitCost));
+        .fold<double>(0, (sum, item) => sum + (item.quantity * item.unitCost))
+        - supplierReturnItems
+            .where((i) => returnIdsInRange.contains(i.returnId))
+            .fold<double>(0, (sum, i) => sum + i.subtotal);
     final expensesTotal = expensesInRange.fold<double>(
       0,
       (sum, entry) => sum + entry.total,
@@ -98,8 +159,41 @@ class ReportingService {
       0,
       (sum, entry) => sum + entry.amount,
     );
-    final netOutflow = purchasesTotal + expensesTotal;
-    final profit = salesTotal - netOutflow;
+
+    final grossProfit = salesTotal - purchasesTotal;
+    final grossMargin = salesTotal > 0 ? (grossProfit / salesTotal * 100) : 0.0;
+    final totalCashIn = salesTotal;
+    final totalCashOut = purchasesTotal + expensesTotal;
+    final netCashFlow = totalCashIn - totalCashOut;
+
+    final netOutflow = totalCashOut;
+    final profit = netCashFlow;
+
+    final now = DateTime.now();
+    final thirtyDays = now.add(const Duration(days: 30));
+    final expiringAlerts = <ExpiryAlert>[];
+    for (final batch in batches) {
+      if (batch.remainingQuantity > 0 &&
+          batch.expiryDate != null &&
+          batch.expiryDate!.isAfter(now) &&
+          batch.expiryDate!.isBefore(thirtyDays)) {
+        final itemName = itemNames[batch.itemId] ?? 'Item #${batch.itemId}';
+        final daysLeft = batch.expiryDate!.difference(now).inDays;
+        expiringAlerts.add(ExpiryAlert(
+          itemName: itemName,
+          expiryDate: batch.expiryDate!,
+          daysLeft: daysLeft,
+          remainingQuantity: batch.remainingQuantity,
+        ));
+      }
+    }
+    expiringAlerts.sort((a, b) => a.daysLeft.compareTo(b.daysLeft));
+
+    final lowStockCount = lowStockItems.length;
+    final expiringSoonCount = expiringAlerts
+        .map((e) => e.itemName)
+        .toSet()
+        .length;
 
     final dailyReports = _buildDailyReports(
       start: start,
@@ -111,6 +205,8 @@ class ReportingService {
       salesEntryItems: salesEntryItems,
       itemNames: itemNames,
       expenseCategoryByEntryId: expenseCategoryByEntryId,
+      supplierReturns: supplierReturns,
+      supplierReturnItems: supplierReturnItems,
     );
 
     return ReportData(
@@ -130,6 +226,14 @@ class ReportingService {
       inventoryValue: inventoryValue,
       lowStockCount: lowStockCount,
       expiringSoonCount: expiringSoonCount,
+      salesLines: salesLines,
+      grossProfit: grossProfit,
+      grossMargin: grossMargin,
+      totalCashIn: totalCashIn,
+      totalCashOut: totalCashOut,
+      netCashFlow: netCashFlow,
+      lowStockItems: lowStockItems,
+      expiringAlerts: expiringAlerts,
     );
   }
 
@@ -144,8 +248,10 @@ class ReportingService {
     required List<SalesEntry> sales,
     required List<SalesEntryItem> salesEntryItems,
     double inventoryValue = 0,
-    int lowStockCount = 0,
-    int expiringSoonCount = 0,
+    List<StockBatch> batches = const [],
+    List<InventoryItem> lowStockItems = const [],
+    List<SupplierReturn> supplierReturns = const [],
+    List<SupplierReturnItem> supplierReturnItems = const [],
   }) {
     final selected = date ?? DateTime.now();
     final start = DateTime(selected.year, selected.month, selected.day);
@@ -163,8 +269,10 @@ class ReportingService {
       sales: sales,
       salesEntryItems: salesEntryItems,
       inventoryValue: inventoryValue,
-      lowStockCount: lowStockCount,
-      expiringSoonCount: expiringSoonCount,
+      batches: batches,
+      lowStockItems: lowStockItems,
+      supplierReturns: supplierReturns,
+      supplierReturnItems: supplierReturnItems,
     );
 
     final match = data.dailyReports.firstWhere(
@@ -183,6 +291,129 @@ class ReportingService {
     return match;
   }
 
+  DailyReportData buildDailyReportData({
+    required DateTime date,
+    required List<SalesEntry> sales,
+    required List<SalesEntryItem> salesEntryItems,
+    required List<JournalEntry> expenses,
+    required List<JournalLine> journalLines,
+    required List<Account> accounts,
+    required List<InventoryItem> items,
+    required List<StockBatch> batches,
+    List<SupplierReturn> supplierReturns = const [],
+    List<SupplierReturnItem> supplierReturnItems = const [],
+  }) {
+    final normalized = _normalizeDate(date);
+    final itemNames = {for (final item in items) item.id: item.name};
+
+    final activeSales = sales
+        .where((s) =>
+            !s.isDraft &&
+            !s.isVoid &&
+            _normalizeDate(s.salesDate) == normalized)
+        .toList();
+
+    double salesRevenue = 0;
+    double costOfGoodsSold = 0;
+    final itemSales = <String, ReportLine>{};
+
+    for (final sale in activeSales) {
+      salesRevenue += sale.amount;
+      final saleItems = salesEntryItems.where((i) => i.salesId == sale.id);
+      for (final lineItem in saleItems) {
+        costOfGoodsSold += lineItem.costOfGoodsSold;
+        final label =
+            itemNames[lineItem.itemId] ?? 'Item #${lineItem.itemId}';
+        itemSales.update(
+          label,
+          (line) => line.copyWith(
+            quantity: line.quantity + lineItem.quantity,
+            total: line.total + lineItem.subtotal,
+          ),
+          ifAbsent: () => ReportLine(
+            label: label,
+            quantity: lineItem.quantity,
+            total: lineItem.subtotal,
+          ),
+        );
+      }
+    }
+
+    final todayReturnIds = supplierReturns
+        .where((r) => _normalizeDate(r.returnDate) == normalized)
+        .map((r) => r.id)
+        .toSet();
+    final supplierReturnTotal = supplierReturnItems
+        .where((i) => todayReturnIds.contains(i.returnId))
+        .fold<double>(0, (sum, i) => sum + i.subtotal);
+
+    final grossProfit = salesRevenue - costOfGoodsSold - supplierReturnTotal;
+
+    final todayExpenses = expenses
+        .where((e) => _normalizeDate(e.date) == normalized)
+        .toList();
+    final expensesTotal = todayExpenses.fold<double>(0, (s, e) => s + e.total);
+    final netProfit = grossProfit - expensesTotal;
+
+    final expenseCategoryByEntryId =
+        _buildExpenseCategoryLookup(accounts, journalLines);
+    final expenseLines = <String, ReportLine>{};
+    for (final entry in todayExpenses) {
+      final label = expenseCategoryByEntryId[entry.id] ?? 'Expenses';
+      expenseLines.update(
+        label,
+        (line) => line.copyWith(
+          quantity: line.quantity + 1,
+          total: line.total + entry.total,
+        ),
+        ifAbsent: () =>
+            ReportLine(label: label, quantity: 1, total: entry.total),
+      );
+    }
+
+    final salesLines = itemSales.values.toList()
+      ..sort((a, b) => b.total.compareTo(a.total));
+    final topSellingItems = itemSales.values.toList()
+      ..sort((a, b) => b.quantity.compareTo(a.quantity));
+    final top5 = topSellingItems.take(5).toList();
+
+    final sortedExpenseLines = expenseLines.values.toList()
+      ..sort((a, b) => b.total.compareTo(a.total));
+
+    final lowStockItems = items.where((item) => item.isLowStock).toList();
+    final now = DateTime.now();
+    final expiringSoonItems = <InventoryItem>[];
+    for (final item in items) {
+      final hasExpiringBatch = batches.any(
+        (b) =>
+            b.itemId == item.id &&
+            b.remainingQuantity > 0 &&
+            b.expiryDate != null &&
+            b.expiryDate!.isAfter(now) &&
+            b.expiryDate!.isBefore(now.add(const Duration(days: 30))),
+      );
+      if (hasExpiringBatch) {
+        expiringSoonItems.add(item);
+      }
+    }
+
+    return DailyReportData(
+      date: normalized,
+      salesRevenue: salesRevenue,
+      costOfGoodsSold: costOfGoodsSold,
+      supplierReturnTotal: supplierReturnTotal,
+      grossProfit: grossProfit,
+      expensesTotal: expensesTotal,
+      netProfit: netProfit,
+      transactionCount: activeSales.length,
+      salesLines: salesLines,
+      expenseLines: sortedExpenseLines,
+      topSellingItems: top5,
+      lowStockItems: lowStockItems,
+      expiringSoonItems: expiringSoonItems,
+    );
+  }
+
   List<DailyReport> _buildDailyReports({
     required DateTime start,
     required DateTime end,
@@ -193,6 +424,8 @@ class ReportingService {
     required List<SalesEntryItem> salesEntryItems,
     required Map<int, String> itemNames,
     required Map<int, String> expenseCategoryByEntryId,
+    List<SupplierReturn> supplierReturns = const [],
+    List<SupplierReturnItem> supplierReturnItems = const [],
   }) {
     final purchaseIdToDate = {
       for (final p in purchases) p.id: p.purchaseDate,
@@ -260,6 +493,22 @@ class ReportingService {
       accumulator.purchasesTotal += item.quantity * item.unitCost;
     }
 
+    // Subtract returns from daily purchase totals
+    final purchaseItemToDate = <int, DateTime>{};
+    for (final item in purchaseEntryItems) {
+      final purchaseDate = purchaseIdToDate[item.purchaseId];
+      if (purchaseDate != null) {
+        purchaseItemToDate[item.id] = _normalizeDate(purchaseDate);
+      }
+    }
+    for (final returnItem in supplierReturnItems) {
+      final date = purchaseItemToDate[returnItem.purchaseItemId];
+      if (date == null) continue;
+      final accumulator = daily[date];
+      if (accumulator == null) continue;
+      accumulator.purchasesTotal -= returnItem.quantity * returnItem.unitCost;
+    }
+
     final reports = daily.values
         .map((accumulator) => accumulator.toReport())
         .where((report) => _isWithin(report.date, start, end))
@@ -312,12 +561,20 @@ class ReportData {
     required this.salesTotal,
     required this.purchasesTotal,
     required this.expensesTotal,
-    required this.netOutflow,
+    @Deprecated('Use netCashFlow instead') required this.netOutflow,
     required this.profit,
     required this.dailyReports,
     required this.inventoryValue,
     required this.lowStockCount,
     required this.expiringSoonCount,
+    required this.salesLines,
+    required this.grossProfit,
+    required this.grossMargin,
+    required this.totalCashIn,
+    required this.totalCashOut,
+    required this.netCashFlow,
+    required this.lowStockItems,
+    required this.expiringAlerts,
   });
 
   final DateTime start;
@@ -330,12 +587,25 @@ class ReportData {
   final double salesTotal;
   final double purchasesTotal;
   final double expensesTotal;
+
+  @Deprecated('Use netCashFlow instead')
   final double netOutflow;
+
   final double profit;
   final List<DailyReport> dailyReports;
   final double inventoryValue;
   final int lowStockCount;
   final int expiringSoonCount;
+
+  // NEW FIELDS
+  final List<ReportLine> salesLines;
+  final double grossProfit;
+  final double grossMargin;
+  final double totalCashIn;
+  final double totalCashOut;
+  final double netCashFlow;
+  final List<InventoryItem> lowStockItems;
+  final List<ExpiryAlert> expiringAlerts;
 }
 
 class DailyReport {
@@ -412,4 +682,50 @@ class ReportLine {
       total: total ?? this.total,
     );
   }
+}
+
+class ExpiryAlert {
+  const ExpiryAlert({
+    required this.itemName,
+    required this.expiryDate,
+    required this.daysLeft,
+    required this.remainingQuantity,
+  });
+
+  final String itemName;
+  final DateTime expiryDate;
+  final int daysLeft;
+  final int remainingQuantity;
+}
+
+class DailyReportData {
+  const DailyReportData({
+    required this.date,
+    required this.salesRevenue,
+    required this.costOfGoodsSold,
+    required this.supplierReturnTotal,
+    required this.grossProfit,
+    required this.expensesTotal,
+    required this.netProfit,
+    required this.transactionCount,
+    required this.salesLines,
+    required this.expenseLines,
+    required this.topSellingItems,
+    required this.lowStockItems,
+    required this.expiringSoonItems,
+  });
+
+  final DateTime date;
+  final double salesRevenue;
+  final double costOfGoodsSold;
+  final double supplierReturnTotal;
+  final double grossProfit;
+  final double expensesTotal;
+  final double netProfit;
+  final int transactionCount;
+  final List<ReportLine> salesLines;
+  final List<ReportLine> expenseLines;
+  final List<ReportLine> topSellingItems;
+  final List<InventoryItem> lowStockItems;
+  final List<InventoryItem> expiringSoonItems;
 }

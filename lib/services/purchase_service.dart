@@ -4,12 +4,14 @@ import '../models/purchase_entry_item.dart';
 import '../models/stock_batch.dart';
 import '../repositories/purchase_repository.dart';
 import 'inventory_service.dart';
+import 'supplier_return_service.dart';
 
 class PurchaseService {
-  PurchaseService(this._repository, this._inventoryService);
+  PurchaseService(this._repository, this._inventoryService, {this.supplierReturnService});
 
   final PurchaseRepository _repository;
   final InventoryService _inventoryService;
+  SupplierReturnService? supplierReturnService;
   final List<PurchaseEntry> _purchases = [];
   final List<StockBatch> _batches = [];
   final List<PurchaseEntryItem> _purchaseEntryItems = [];
@@ -599,9 +601,12 @@ class PurchaseService {
     } catch (_) {
       return 0;
     }
-    return _purchaseEntryItems
+    final gross = _purchaseEntryItems
         .where((item) => item.purchaseId == purchaseId)
         .fold(0.0, (sum, item) => sum + item.subtotal);
+    final returned = supplierReturnService?.totalReturnedForPurchase(purchaseId) ?? 0;
+    final net = gross - returned;
+    return net < 0 ? 0 : net;
   }
 
   List<PurchaseEntryItem> purchaseEntryItemsForPurchase(int purchaseId) {

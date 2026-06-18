@@ -11,7 +11,9 @@ import '../controllers/expenses_controller.dart';
 import '../controllers/inventory_controller.dart';
 import '../controllers/purchase_controller.dart';
 import '../controllers/sales_controller.dart';
+import '../controllers/supplier_return_controller.dart';
 import '../services/reporting_service.dart';
+import 'daily_report_detail_screen.dart';
 
 class ReportingScreen extends StatefulWidget {
   const ReportingScreen({
@@ -20,12 +22,14 @@ class ReportingScreen extends StatefulWidget {
     required this.purchaseController,
     required this.expensesController,
     required this.salesController,
+    this.supplierReturnController,
   });
 
   final InventoryController inventoryController;
   final PurchaseController purchaseController;
   final ExpensesController expensesController;
   final SalesController salesController;
+  final SupplierReturnController? supplierReturnController;
 
   @override
   State<ReportingScreen> createState() => _ReportingScreenState();
@@ -42,6 +46,8 @@ class _ReportingScreenState extends State<ReportingScreen> {
   PurchaseController get _purchaseController => widget.purchaseController;
   ExpensesController get _expensesController => widget.expensesController;
   SalesController get _salesController => widget.salesController;
+  SupplierReturnController? get _supplierReturnController =>
+      widget.supplierReturnController;
 
   ReportRange _range = ReportRange.monthToDate;
 
@@ -52,6 +58,7 @@ class _ReportingScreenState extends State<ReportingScreen> {
         _inventoryController,
         _expensesController,
         _salesController,
+        if (_supplierReturnController != null) _supplierReturnController!,
       ]),
       builder: (context, _) {
         final report = _buildReport();
@@ -70,12 +77,12 @@ class _ReportingScreenState extends State<ReportingScreen> {
                         style: Theme.of(context).textTheme.headlineSmall,
                       ),
                       const SizedBox(height: 4),
-                      Text(
-                        'Range: ${_formatDate(report.start)} - ${_formatDate(report.end)}',
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                      const SizedBox(height: 16),
-                      SegmentedButton<ReportRange>(
+                        Text(
+                          'Range: ${_formatDate(report.start)} - ${_formatDate(report.end)}',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                        const SizedBox(height: 16),
+                        SegmentedButton<ReportRange>(
                         segments: const [
                           ButtonSegment(
                             value: ReportRange.monthToDate,
@@ -96,26 +103,28 @@ class _ReportingScreenState extends State<ReportingScreen> {
                       const SizedBox(height: 16),
                       _InfoBanner(
                         message:
-                            'Sales totals use selling prices. Purchases use unit cost. Profit is cash flow, not FIFO/FEFO COGS.',
+                            'Gross profit uses purchase cost as COGS proxy. Actual COGS may differ with FIFO/FEFO accounting.',
                       ),
                       const SizedBox(height: 16),
                       Row(
                         children: [
                           Expanded(
                             child: _InfoCard(
-                              title: 'Sales',
+                              title: 'Sales Revenue',
                               value: report.salesTotal.toStringAsFixed(2),
-                              caption: 'Selling price · ${report.salesCount} entries',
+                              caption: '${report.salesCount} transactions',
                               icon: Icons.point_of_sale_outlined,
                             ),
                           ),
                           const SizedBox(width: 12),
                           Expanded(
                             child: _InfoCard(
-                              title: 'Purchases',
-                              value: report.purchasesTotal.toStringAsFixed(2),
-                              caption: 'Unit cost · ${report.purchaseCount} entries',
-                              icon: Icons.shopping_cart_outlined,
+                              title: 'Gross Profit',
+                              value: report.grossProfit.toStringAsFixed(2),
+                              caption: report.salesTotal > 0
+                                  ? 'Margin ${report.grossMargin.toStringAsFixed(1)}%'
+                                  : 'No sales',
+                              icon: Icons.trending_up,
                             ),
                           ),
                         ],
@@ -134,10 +143,10 @@ class _ReportingScreenState extends State<ReportingScreen> {
                           const SizedBox(width: 12),
                           Expanded(
                             child: _InfoCard(
-                              title: 'Profit (cash)',
-                              value: report.profit.toStringAsFixed(2),
-                              caption: 'Sales - outflow',
-                              icon: Icons.trending_up,
+                              title: 'Net Profit',
+                              value: report.netCashFlow.toStringAsFixed(2),
+                              caption: 'After all costs',
+                              icon: Icons.account_balance,
                             ),
                           ),
                         ],
@@ -147,10 +156,32 @@ class _ReportingScreenState extends State<ReportingScreen> {
                         children: [
                           Expanded(
                             child: _InfoCard(
-                              title: 'Net Outflow',
-                              value: report.netOutflow.toStringAsFixed(2),
-                              caption: 'Purchases + expenses',
-                              icon: Icons.trending_down,
+                              title: 'Money In',
+                              value: report.totalCashIn.toStringAsFixed(2),
+                              caption: 'Sales revenue',
+                              icon: Icons.arrow_downward,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _InfoCard(
+                              title: 'Money Out',
+                              value: report.totalCashOut.toStringAsFixed(2),
+                              caption: 'Purchases + Expenses',
+                              icon: Icons.arrow_upward,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _InfoCard(
+                              title: 'Net Cash Flow',
+                              value: report.netCashFlow.toStringAsFixed(2),
+                              caption: 'Cash movement',
+                              icon: Icons.swap_horiz,
                             ),
                           ),
                           const SizedBox(width: 12),
@@ -164,26 +195,66 @@ class _ReportingScreenState extends State<ReportingScreen> {
                           ),
                         ],
                       ),
+                      const SizedBox(height: 24),
+                      _buildPnlCard(report),
                       const SizedBox(height: 16),
-                      _SectionHeader(
-                        title: 'Inventory health',
-                        trailing: Text(
-                          'Low stock: ${report.lowStockCount} • Expiring soon: ${report.expiringSoonCount}',
-                          style: Theme.of(context).textTheme.bodySmall,
+                      _buildCashFlowCard(report),
+                      const SizedBox(height: 16),
+                      if (report.salesLines.isNotEmpty) ...[
+                        _SectionHeader(title: 'Top Selling Items'),
+                        const SizedBox(height: 8),
+                        _ReportList(
+                          lines: report.salesLines,
+                          emptyLabel: 'No sales in this range.',
+                          quantityLabel: 'Qty sold',
                         ),
-                      ),
-                      const SizedBox(height: 8),
-                      _HealthRow(
-                        lowStockCount: report.lowStockCount,
-                        expiringSoonCount: report.expiringSoonCount,
-                      ),
-                      const SizedBox(height: 16),
+                        const SizedBox(height: 16),
+                      ],
+                      if (report.expiringAlerts.isNotEmpty ||
+                          report.lowStockItems.isNotEmpty) ...[
+                        _SectionHeader(title: 'Inventory Alerts'),
+                        const SizedBox(height: 8),
+                        if (report.lowStockItems.isNotEmpty) ...[
+                          _AlertSection(
+                            title: 'Low Stock Items',
+                            items: report.lowStockItems
+                                .map((item) => _AlertItem(
+                                      name: item.name,
+                                      detail: '${item.quantity} left',
+                                    ))
+                                .toList(),
+                          ),
+                          const SizedBox(height: 8),
+                        ],
+                        if (report.expiringAlerts.isNotEmpty) ...[
+                          _AlertSection(
+                            title: 'Expiring Soon',
+                            items: report.expiringAlerts
+                                .map((alert) => _AlertItem(
+                                      name: alert.itemName,
+                                      detail:
+                                          'Expires ${_formatDate(alert.expiryDate)} · ${alert.daysLeft} days left',
+                                    ))
+                                .toList(),
+                          ),
+                          const SizedBox(height: 8),
+                        ],
+                        if (report.lowStockCount == 0 &&
+                            report.expiringSoonCount == 0) ...[
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            child: Text('No inventory alerts.',
+                                style: Theme.of(context).textTheme.bodyMedium),
+                          ),
+                        ],
+                        const SizedBox(height: 16),
+                      ],
                       _SectionHeader(title: 'Purchases by item'),
                       const SizedBox(height: 8),
-                        _ReportList(
+                      _ReportList(
                         emptyLabel: 'No purchases in this range.',
                         lines: report.purchaseLines,
-                          quantityLabel: 'Units (cost)',
+                        quantityLabel: 'Units (cost)',
                       ),
                       const SizedBox(height: 16),
                       _SectionHeader(title: 'Expenses by category'),
@@ -248,13 +319,31 @@ class _ReportingScreenState extends State<ReportingScreen> {
                                   salesEntryItems:
                                       _salesController.salesEntryItems,
                                   inventoryValue: _inventoryController.totalValue,
-                                  lowStockCount:
-                                      _inventoryController.lowStockItems.length,
-                                  expiringSoonCount:
-                                      _inventoryController.expiringSoonItems.length,
+                                  batches: _purchaseController.batches,
+                                  lowStockItems:
+                                      _inventoryController.lowStockItems,
+                                  supplierReturns:
+                                      _supplierReturnController?.returns ?? [],
+                                  supplierReturnItems:
+                                      _supplierReturnController?.returnItems ?? [],
                                 ),
                               ],
                         formatDate: _formatDate,
+                        onTap: (date) {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (_) => DailyReportDetailScreen(
+                                inventoryController: _inventoryController,
+                                purchaseController: _purchaseController,
+                                expensesController: _expensesController,
+                                salesController: _salesController,
+                                supplierReturnController:
+                                    _supplierReturnController,
+                                initialDate: date,
+                              ),
+                            ),
+                          );
+                        },
                       ),
                       const SizedBox(height: 20),
                       Row(
@@ -285,13 +374,15 @@ class _ReportingScreenState extends State<ReportingScreen> {
                           label: const Text('Share via WhatsApp'),
                         ),
                       ),
-                    ],
-                  ),
+                      ],
+                ),
                 ),
         );
       },
     );
   }
+
+
 
   ReportData _buildReport() {
     final now = DateTime.now();
@@ -311,10 +402,103 @@ class _ReportingScreenState extends State<ReportingScreen> {
       sales: _salesController.salesEntries,
       salesEntryItems: _salesController.salesEntryItems,
       inventoryValue: _inventoryController.totalValue,
-      lowStockCount: _inventoryController.lowStockItems.length,
-      expiringSoonCount: _inventoryController.expiringSoonItems.length,
+      batches: _purchaseController.batches,
+      lowStockItems: _inventoryController.lowStockItems,
+      supplierReturns: _supplierReturnController?.returns ?? [],
+      supplierReturnItems: _supplierReturnController?.returnItems ?? [],
     );
   }
+
+  Widget _buildPnlCard(ReportData report) {
+    final theme = Theme.of(context);
+    final grossMarginDisplay = report.salesTotal > 0
+        ? '${report.grossMargin.toStringAsFixed(1)}%'
+        : 'N/A';
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Financial Summary',
+                style: theme.textTheme.titleMedium
+                    ?.copyWith(fontWeight: FontWeight.w600)),
+            const SizedBox(height: 12),
+            _pnlRow('Sales Revenue', report.salesTotal),
+            _pnlRow('Cost of Goods Sold (Purchase Cost)',
+                -report.purchasesTotal),
+            const Divider(height: 16),
+            _pnlRow('Gross Profit', report.grossProfit,
+                bold: true, showSign: true),
+            Padding(
+              padding: const EdgeInsets.only(left: 16, top: 2),
+              child: Text('Gross Margin: $grossMarginDisplay',
+                  style: theme.textTheme.bodySmall),
+            ),
+            const Divider(height: 16),
+            _pnlRow('Operating Expenses', -report.expensesTotal),
+            const Divider(height: 16),
+            _pnlRow('Net Profit', report.netCashFlow,
+                bold: true, showSign: true),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCashFlowCard(ReportData report) {
+    final theme = Theme.of(context);
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Cash Flow',
+                style: theme.textTheme.titleMedium
+                    ?.copyWith(fontWeight: FontWeight.w600)),
+            const SizedBox(height: 12),
+            _pnlRow('Money In (Sales)', report.totalCashIn),
+            _pnlRow('Money Out (Purchases)', -report.purchasesTotal),
+            _pnlRow('Money Out (Expenses)', -report.expensesTotal),
+            const Divider(height: 16),
+            _pnlRow('Net Cash Flow', report.netCashFlow,
+                bold: true, showSign: true),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _pnlRow(String label, double value,
+      {bool bold = false, bool showSign = false}) {
+    final isNegative = value < 0;
+    final display =
+        isNegative ? '-\$${_fmt(value.abs())}' : '\$${_fmt(value)}';
+    final theme = Theme.of(context);
+    final color = bold
+        ? (isNegative ? theme.colorScheme.error : theme.colorScheme.primary)
+        : null;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(label,
+                style: theme.textTheme.bodyMedium
+                    ?.copyWith(fontWeight: bold ? FontWeight.w600 : null)),
+          ),
+          Text(display,
+              style: theme.textTheme.bodyMedium?.copyWith(
+                fontWeight: bold ? FontWeight.w600 : null,
+                color: color,
+              )),
+        ],
+      ),
+    );
+  }
+
+  String _fmt(double value) => value.toStringAsFixed(2);
 
   Future<void> _exportCsv(ReportData report) async {
     final directory = await getApplicationDocumentsDirectory();
@@ -364,55 +548,94 @@ class _ReportingScreenState extends State<ReportingScreen> {
     await File(csvPath).writeAsString(_buildCsvContent(report));
     await File(pdfPath).writeAsBytes(await _buildPdfBytes(report));
 
-    final message =
-        'Report ${_formatDate(report.start)} - ${_formatDate(report.end)}';
     await Share.shareXFiles(
       [
         XFile(csvPath, mimeType: 'text/csv'),
         XFile(pdfPath, mimeType: 'application/pdf'),
       ],
-      text: message,
     );
   }
 
   String _buildCsvContent(ReportData report) {
+    final generated = DateTime.now();
+    final stamp =
+        '${_formatDate(generated)} ${generated.hour.toString().padLeft(2, '0')}:${generated.minute.toString().padLeft(2, '0')}';
+    final grossMarginDisplay = report.salesTotal > 0
+        ? '${report.grossMargin.toStringAsFixed(1)}%'
+        : 'N/A';
+
     final rows = <List<dynamic>>[
-      [
-        'Report range',
-        '${_formatDate(report.start)} - ${_formatDate(report.end)}',
-      ],
+      ['Monthly Report',
+          '${_formatDate(report.start)} to ${_formatDate(report.end)}'],
+      ['Generated', stamp],
       [],
-      ['Summary'],
+      ['FINANCIAL SUMMARY'],
       ['Metric', 'Value'],
-      ['Sales total (selling price)', report.salesTotal.toStringAsFixed(2)],
-      ['Purchases total (unit cost)', report.purchasesTotal.toStringAsFixed(2)],
-      ['Expenses total', report.expensesTotal.toStringAsFixed(2)],
-      ['Net outflow', report.netOutflow.toStringAsFixed(2)],
-      ['Profit (cash)', report.profit.toStringAsFixed(2)],
-      ['Inventory value', report.inventoryValue.toStringAsFixed(2)],
-      ['Low stock items', report.lowStockCount],
-      ['Expiring soon items', report.expiringSoonCount],
+      ['Sales Revenue', report.salesTotal.toStringAsFixed(2)],
+      ['Cost of Goods Sold (Purchase Cost)',
+          report.purchasesTotal.toStringAsFixed(2)],
+      ['Gross Profit', report.grossProfit.toStringAsFixed(2)],
+      ['Gross Margin', grossMarginDisplay],
+      ['Operating Expenses', report.expensesTotal.toStringAsFixed(2)],
+      ['Net Profit', report.netCashFlow.toStringAsFixed(2)],
       [],
-      ['Purchases by item (cost)'],
-      ['Item', 'Quantity', 'Cost'],
-      ...report.purchaseLines.map(
-        (line) => [
-          line.label,
-          line.quantity,
-          line.total.toStringAsFixed(2),
-        ],
-      ),
+      ['CASH FLOW'],
+      ['Metric', 'Value'],
+      ['Money In (Sales)', report.totalCashIn.toStringAsFixed(2)],
+      ['Money Out (Purchases)', report.purchasesTotal.toStringAsFixed(2)],
+      ['Money Out (Expenses)', report.expensesTotal.toStringAsFixed(2)],
+      ['Net Cash Flow', report.netCashFlow.toStringAsFixed(2)],
       [],
-      ['Expenses by category'],
-      ['Category', 'Entries', 'Total'],
-      ...report.expenseLines.map(
-        (line) => [
-          line.label,
-          line.quantity,
-          line.total.toStringAsFixed(2),
-        ],
-      ),
+      ['TRANSACTIONS'],
+      ['Type', 'Count'],
+      ['Sales', report.salesCount],
+      ['Purchases', report.purchaseCount],
+      ['Expenses', report.expenseCount],
+      [],
+      ['INVENTORY SUMMARY'],
+      ['Metric', 'Value'],
+      ['Inventory Value', report.inventoryValue.toStringAsFixed(2)],
     ];
+
+    if (report.lowStockItems.isNotEmpty ||
+        report.expiringAlerts.isNotEmpty) {
+      rows.add([]);
+      rows.add(['INVENTORY ALERTS']);
+      rows.add(['Type', 'Item', 'Quantity', 'Expiry Date', 'Days Left']);
+      for (final item in report.lowStockItems) {
+        rows.add(['Low Stock', item.name, item.quantity, '', '']);
+      }
+      for (final alert in report.expiringAlerts) {
+        rows.add([
+          'Near Expiry',
+          alert.itemName,
+          '',
+          _formatDate(alert.expiryDate),
+          alert.daysLeft,
+        ]);
+      }
+    }
+
+    rows.add([]);
+    rows.add(['TOP SELLING ITEMS']);
+    rows.add(['Item', 'Quantity', 'Revenue']);
+    for (final line in report.salesLines) {
+      rows.add([line.label, line.quantity, line.total.toStringAsFixed(2)]);
+    }
+
+    rows.add([]);
+    rows.add(['PURCHASES BY ITEM']);
+    rows.add(['Item', 'Quantity', 'Cost']);
+    for (final line in report.purchaseLines) {
+      rows.add([line.label, line.quantity, line.total.toStringAsFixed(2)]);
+    }
+
+    rows.add([]);
+    rows.add(['EXPENSES BY CATEGORY']);
+    rows.add(['Category', 'Entries', 'Total']);
+    for (final line in report.expenseLines) {
+      rows.add([line.label, line.quantity, line.total.toStringAsFixed(2)]);
+    }
 
     return const ListToCsvConverter().convert(rows);
   }
@@ -420,64 +643,142 @@ class _ReportingScreenState extends State<ReportingScreen> {
   Future<List<int>> _buildPdfBytes(ReportData report) async {
     final doc = pw.Document();
     final rangeText = '${_formatDate(report.start)} - ${_formatDate(report.end)}';
+    final generated = DateTime.now();
+    final generatedText =
+        '${_formatDate(generated)} ${generated.hour.toString().padLeft(2, '0')}:${generated.minute.toString().padLeft(2, '0')}';
+    final grossMarginDisplay = report.salesTotal > 0
+        ? '${report.grossMargin.toStringAsFixed(1)}%'
+        : 'N/A';
 
     doc.addPage(
       pw.MultiPage(
         build: (context) => [
-          pw.Text(
-            'Reporting Summary',
-            style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold),
-          ),
+          pw.Text('Monthly Report',
+              style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold)),
           pw.SizedBox(height: 4),
-          pw.Text('Range: $rangeText'),
-          pw.SizedBox(height: 12),
+          pw.Text('Period: $rangeText'),
+          pw.Text('Generated: $generatedText'),
+          pw.SizedBox(height: 16),
+
+          pw.Text('Financial Summary',
+              style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+          pw.SizedBox(height: 8),
           pw.Table.fromTextArray(
             headers: const ['Metric', 'Value'],
             data: [
-              ['Sales total (selling price)', report.salesTotal.toStringAsFixed(2)],
-              ['Purchases total (unit cost)', report.purchasesTotal.toStringAsFixed(2)],
-              ['Expenses total', report.expensesTotal.toStringAsFixed(2)],
-              ['Net outflow', report.netOutflow.toStringAsFixed(2)],
-              ['Profit (cash)', report.profit.toStringAsFixed(2)],
-              ['Inventory value', report.inventoryValue.toStringAsFixed(2)],
-              ['Low stock items', report.lowStockCount.toString()],
-              ['Expiring soon items', report.expiringSoonCount.toString()],
+              ['Sales Revenue', report.salesTotal.toStringAsFixed(2)],
+              ['Cost of Goods Sold (Purchase Cost)',
+                  report.purchasesTotal.toStringAsFixed(2)],
+              ['Gross Profit', report.grossProfit.toStringAsFixed(2)],
+              ['Gross Margin', grossMarginDisplay],
+              ['Operating Expenses', report.expensesTotal.toStringAsFixed(2)],
+              ['Net Profit', report.netCashFlow.toStringAsFixed(2)],
             ],
           ),
           pw.SizedBox(height: 16),
-          pw.Text(
-            'Purchases by item (cost)',
-            style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+
+          pw.Text('Cash Flow',
+              style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+          pw.SizedBox(height: 8),
+          pw.Table.fromTextArray(
+            headers: const ['Metric', 'Value'],
+            data: [
+              ['Money In (Sales)', report.totalCashIn.toStringAsFixed(2)],
+              ['Money Out (Purchases)',
+                  report.purchasesTotal.toStringAsFixed(2)],
+              ['Money Out (Expenses)',
+                  report.expensesTotal.toStringAsFixed(2)],
+              ['Net Cash Flow', report.netCashFlow.toStringAsFixed(2)],
+            ],
           ),
+          pw.SizedBox(height: 16),
+
+          pw.Text('Transactions',
+              style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+          pw.SizedBox(height: 8),
+          pw.Table.fromTextArray(
+            headers: const ['Type', 'Count'],
+            data: [
+              ['Sales', report.salesCount.toString()],
+              ['Purchases', report.purchaseCount.toString()],
+              ['Expenses', report.expenseCount.toString()],
+            ],
+          ),
+          pw.SizedBox(height: 16),
+
+          pw.Text('Inventory Summary',
+              style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+          pw.SizedBox(height: 8),
+          pw.Table.fromTextArray(
+            headers: const ['Metric', 'Value'],
+            data: [
+              ['Inventory Value',
+                  report.inventoryValue.toStringAsFixed(2)],
+            ],
+          ),
+
+          if (report.lowStockItems.isNotEmpty ||
+              report.expiringAlerts.isNotEmpty) ...[
+            pw.SizedBox(height: 16),
+            pw.Text('Inventory Alerts',
+                style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+            pw.SizedBox(height: 8),
+            pw.Table.fromTextArray(
+              headers: const ['Type', 'Item', 'Quantity', 'Expiry Date', 'Days Left'],
+              data: [
+                ...report.lowStockItems.map((item) =>
+                    ['Low Stock', item.name, item.quantity.toString(), '', '']),
+                ...report.expiringAlerts.map((alert) =>
+                    ['Near Expiry', alert.itemName, '', _formatDate(alert.expiryDate), alert.daysLeft.toString()]),
+              ],
+            ),
+          ],
+
+          pw.SizedBox(height: 16),
+          pw.Text('Top Selling Items',
+              style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+          pw.SizedBox(height: 8),
+          pw.Table.fromTextArray(
+            headers: const ['Item', 'Quantity', 'Revenue'],
+            data: report.salesLines
+                .take(12)
+                .map((line) => [
+                      line.label,
+                      line.quantity.toString(),
+                      line.total.toStringAsFixed(2),
+                    ])
+                .toList(),
+          ),
+          pw.SizedBox(height: 16),
+
+          pw.Text('Purchases by Item',
+              style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+          pw.SizedBox(height: 8),
           pw.Table.fromTextArray(
             headers: const ['Item', 'Quantity', 'Cost'],
             data: report.purchaseLines
                 .take(12)
-                .map(
-                  (line) => [
-                    line.label,
-                    line.quantity.toString(),
-                    line.total.toStringAsFixed(2),
-                  ],
-                )
+                .map((line) => [
+                      line.label,
+                      line.quantity.toString(),
+                      line.total.toStringAsFixed(2),
+                    ])
                 .toList(),
           ),
           pw.SizedBox(height: 16),
-          pw.Text(
-            'Expenses by category',
-            style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
-          ),
+
+          pw.Text('Expenses by Category',
+              style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+          pw.SizedBox(height: 8),
           pw.Table.fromTextArray(
             headers: const ['Category', 'Entries', 'Total'],
             data: report.expenseLines
                 .take(12)
-                .map(
-                  (line) => [
-                    line.label,
-                    line.quantity.toString(),
-                    line.total.toStringAsFixed(2),
-                  ],
-                )
+                .map((line) => [
+                      line.label,
+                      line.quantity.toString(),
+                      line.total.toStringAsFixed(2),
+                    ])
                 .toList(),
           ),
         ],
@@ -589,22 +890,15 @@ class _InfoCard extends StatelessWidget {
 }
 
 class _SectionHeader extends StatelessWidget {
-  const _SectionHeader({required this.title, this.trailing});
+  const _SectionHeader({required this.title});
 
   final String title;
-  final Widget? trailing;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(
-          title,
-          style: Theme.of(context).textTheme.titleMedium,
-        ),
-        if (trailing != null) trailing!,
-      ],
+    return Text(
+      title,
+      style: Theme.of(context).textTheme.titleMedium,
     );
   }
 }
@@ -653,10 +947,12 @@ class _DailyReportList extends StatelessWidget {
   const _DailyReportList({
     required this.reports,
     required this.formatDate,
+    this.onTap,
   });
 
   final List<DailyReport> reports;
   final String Function(DateTime date) formatDate;
+  final void Function(DateTime date)? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -667,46 +963,50 @@ class _DailyReportList extends StatelessWidget {
       children: reports
           .map(
             (report) => Card(
-              child: ExpansionTile(
-                title: Text(formatDate(report.date)),
-                subtitle: Text(
-                  'Sales ${report.salesTotal.toStringAsFixed(2)} · '
-                  'Qty ${report.salesQuantity} · '
-                  'Expenses ${report.expensesTotal.toStringAsFixed(2)} · '
-                  'Profit (cash) ${report.profit.toStringAsFixed(2)}',
-                ),
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const SizedBox(height: 8),
-                        Text(
-                          'Sales by item',
-                          style: Theme.of(context).textTheme.titleSmall,
-                        ),
-                        const SizedBox(height: 8),
-                        _ReportList(
-                          lines: report.salesLines,
-                          emptyLabel: 'No sales for this day.',
-                          quantityLabel: 'Units',
-                        ),
-                        const SizedBox(height: 12),
-                        Text(
-                          'Expenses by category',
-                          style: Theme.of(context).textTheme.titleSmall,
-                        ),
-                        const SizedBox(height: 8),
-                        _ReportList(
-                          lines: report.expenseLines,
-                          emptyLabel: 'No expenses for this day.',
-                          quantityLabel: 'Entries',
-                        ),
-                      ],
-                    ),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: onTap != null ? () => onTap!(report.date) : null,
+                child: ExpansionTile(
+                  title: Text(formatDate(report.date)),
+                  subtitle: Text(
+                    'Sales ${report.salesTotal.toStringAsFixed(2)} · '
+                    'Qty ${report.salesQuantity} · '
+                    'Expenses ${report.expensesTotal.toStringAsFixed(2)} · '
+                    'Net Profit ${report.profit.toStringAsFixed(2)}',
                   ),
-                ],
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const SizedBox(height: 8),
+                          Text(
+                            'Sales by item',
+                            style: Theme.of(context).textTheme.titleSmall,
+                          ),
+                          const SizedBox(height: 8),
+                          _ReportList(
+                            lines: report.salesLines,
+                            emptyLabel: 'No sales for this day.',
+                            quantityLabel: 'Units',
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            'Expenses by category',
+                            style: Theme.of(context).textTheme.titleSmall,
+                          ),
+                          const SizedBox(height: 8),
+                          _ReportList(
+                            lines: report.expenseLines,
+                            emptyLabel: 'No expenses for this day.',
+                            quantityLabel: 'Entries',
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           )
@@ -715,74 +1015,51 @@ class _DailyReportList extends StatelessWidget {
   }
 }
 
-class _HealthRow extends StatelessWidget {
-  const _HealthRow({
-    required this.lowStockCount,
-    required this.expiringSoonCount,
+class _AlertItem {
+  const _AlertItem({
+    required this.name,
+    required this.detail,
   });
 
-  final int lowStockCount;
-  final int expiringSoonCount;
+  final String name;
+  final String detail;
+}
+
+class _AlertSection extends StatelessWidget {
+  const _AlertSection({
+    required this.title,
+    required this.items,
+  });
+
+  final String title;
+  final List<_AlertItem> items;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
+    final theme = Theme.of(context);
+    final color = title.contains('Expiring')
+        ? theme.colorScheme.error
+        : theme.colorScheme.tertiary;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(
-          child: _HealthTile(
-            label: 'Low stock items',
-            value: lowStockCount.toString(),
-            icon: Icons.warning_amber_outlined,
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: _HealthTile(
-            label: 'Expiring soon',
-            value: expiringSoonCount.toString(),
-            icon: Icons.timer_outlined,
+        Text(title,
+            style: theme.textTheme.titleSmall
+                ?.copyWith(color: color, fontWeight: FontWeight.w600)),
+        const SizedBox(height: 4),
+        Card(
+          child: Column(
+            children: items
+                .map((item) => ListTile(
+                      dense: true,
+                      title: Text(item.name),
+                      trailing: Text(item.detail,
+                          style: theme.textTheme.bodySmall),
+                    ))
+                .toList(),
           ),
         ),
       ],
-    );
-  }
-}
-
-class _HealthTile extends StatelessWidget {
-  const _HealthTile({
-    required this.label,
-    required this.value,
-    required this.icon,
-  });
-
-  final String label;
-  final String value;
-  final IconData icon;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(
-              icon,
-              color: Theme.of(context).colorScheme.primary,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              value,
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            Text(
-              label,
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          ],
-        ),
-      ),
     );
   }
 }

@@ -91,6 +91,7 @@ class _HomeShellState extends State<HomeShell> {
   @override
   void initState() {
     super.initState();
+    _purchaseService.supplierReturnService = _supplierReturnService;
     _loadData();
   }
 
@@ -131,6 +132,7 @@ class _HomeShellState extends State<HomeShell> {
           purchaseController: _purchaseController,
           expensesController: _expensesController,
           salesController: _salesController,
+          supplierReturnController: _supplierReturnController,
         ),
       ];
 
